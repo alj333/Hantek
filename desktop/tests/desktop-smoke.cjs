@@ -1,0 +1,94 @@
+// Integration tests for this app's real Electron renderer and IPC in demo mode.
+// No hardware commands are issued. Screenshots and profiles stay local.
+const { _electron: electron } = require('playwright');
+const { expect } = require('@playwright/test');
+const path = require('node:path');
+const fs = require('node:fs/promises');
+const { randomUUID } = require('node:crypto');
+const { spawn } = require('node:child_process');
+
+(async () => {
+  const repo = path.resolve(__dirname, '..', '..');
+  const folder = path.join(repo, '.local', 'desktop-ui-tests', randomUUID());
+  await fs.mkdir(folder, { recursive: true });
+  const env = { ...process.env, HANTEK_STUDIO_PROFILE: path.join(folder, 'profile'), HANTEK_STUDIO_DATA_DIR: path.join(folder, 'data') };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const packaged = process.env.HANTEK_TEST_EXECUTABLE;
+  const application = await electron.launch({ executablePath: packaged || require('electron'), args: [...(packaged ? [] : [path.join(repo, 'desktop')]), '--demo'], env, timeout: 45000 });
+  const errors = [];
+  let checks = 0;
+  try {
+    const page = await application.firstWindow();
+    page.on('pageerror', error => errors.push(error.message));
+    page.setDefaultTimeout(15000);
+    await expect(page.getByRole('heading', { name: 'Scope workspace', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Connect demo', exact: true })).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Save capture', exact: true })).toBeDisabled();
+    await expect(page.locator('.demo-ribbon')).toContainText('Demo workspace'); checks++;
+    const boundary = await page.evaluate(() => ({ require: typeof window.require, process: typeof window.process, api: Object.keys(window.scopeApp) }));
+    expect(boundary.require).toBe('undefined'); expect(boundary.process).toBe('undefined'); expect(boundary.api).not.toContain('send'); checks++;
+    await page.getByRole('button', { name: 'Connect demo', exact: true }).click();
+    await expect(page.locator('.scope-screen img')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save capture', exact: true })).toBeEnabled();
+    expect((await page.evaluate(() => window.scopeApp.getState())).captures).toHaveLength(0); checks++;
+    await expect.poll(async () => page.locator('.scope-screen').evaluate(element => element.getBoundingClientRect().bottom <= window.innerHeight)).toBe(true);
+    await page.screenshot({ path: path.join(folder, 'workspace.png') });
+    await page.getByRole('button', { name: 'Save capture', exact: true }).click();
+    await expect.poll(async () => (await page.evaluate(() => window.scopeApp.getState())).captures.length).toBe(1); checks++;
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(page.getByText('Demo acquisition stopped.', { exact: true }).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.getByText('Demo acquisition started.', { exact: true }).first()).toBeVisible(); checks++;
+    await page.locator('.nav-item').filter({ hasText: 'Captures' }).click();
+    await page.locator('.capture-card').first().click();
+    await page.getByLabel('Capture name', { exact: true }).fill('Demo validation capture');
+    await page.getByLabel('Notes', { exact: true }).fill('Synthetic screen used to validate the desktop app.');
+    await page.getByRole('button', { name: 'Save details', exact: true }).click();
+    await expect(page.locator('.capture-card h3')).toHaveText('Demo validation capture'); checks++;
+    await page.screenshot({ path: path.join(folder, 'library.png'), fullPage: true });
+    await page.getByLabel('Search captures', { exact: true }).fill('absent search term');
+    await expect(page.getByRole('heading', { name: 'No matching captures' })).toBeVisible();
+    await page.getByLabel('Search captures', { exact: true }).fill('validation');
+    await expect(page.locator('.capture-card')).toHaveCount(1); checks++;
+    // Exercise the actual export IPC while replacing only the native dialog.
+    const exportPath = path.join(folder, 'exported-demo.png');
+    await application.evaluate(({ dialog }, filename) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: filename }); }, exportPath);
+    await page.getByRole('button', { name: 'Export PNG', exact: true }).click();
+    await expect.poll(async () => fs.stat(exportPath).then(stat => stat.size).catch(() => 0)).toBeGreaterThan(33); checks++;
+    await page.locator('.nav-item').filter({ hasText: 'Settings' }).click();
+    await page.getByLabel('Auto-refresh interval').selectOption('3000');
+    await expect(page.getByRole('button', { name: 'Connect demo', exact: true })).toBeEnabled();
+    await page.getByRole('button', { name: 'Advanced connection', exact: true }).click();
+    await page.getByLabel('Device interface GUID').fill('invalid');
+    await page.getByRole('button', { name: 'Save identifier', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('GUID'); checks++;
+    await page.screenshot({ path: path.join(folder, 'settings.png'), fullPage: true });
+    await page.locator('.nav-item').filter({ hasText: 'Workspace' }).click();
+    await page.getByRole('button', { name: 'Connect demo', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Save capture', exact: true })).toBeEnabled();
+    const firstFrame = await page.locator('.scope-screen img').getAttribute('src');
+    await page.getByRole('switch').check();
+    await expect.poll(() => page.locator('.scope-screen img').getAttribute('src'), { timeout: 12000 }).not.toBe(firstFrame);
+    expect((await page.evaluate(() => window.scopeApp.getState())).captures).toHaveLength(1); checks++;
+    await page.locator('.nav-item').filter({ hasText: 'Captures' }).click();
+    await page.locator('.nav-item').filter({ hasText: 'Workspace' }).click();
+    await expect(page.getByRole('switch')).not.toBeChecked(); checks++;
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1000, 740));
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect.poll(async () => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await expect.poll(async () => page.locator('.scope-screen').evaluate(element => { const box = element.getBoundingClientRect(); return box.top >= 0 && box.bottom <= window.innerHeight; })).toBe(true);
+    await page.screenshot({ path: path.join(folder, 'compact-workspace.png') }); checks++;
+    await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Save capture', exact: true })).toBeDisabled();
+    expect(errors).toEqual([]); checks++;
+    const duplicateExit = await new Promise((resolve, reject) => {
+      const duplicate = spawn(packaged || require('electron'), [...(packaged ? [] : [path.join(repo, 'desktop')]), '--demo'], { env, windowsHide: true, stdio: 'ignore', shell: false });
+      const timer = setTimeout(() => { duplicate.kill(); reject(new Error('Second instance did not exit.')); }, 10000);
+      duplicate.on('error', error => { clearTimeout(timer); reject(error); });
+      duplicate.on('exit', code => { clearTimeout(timer); resolve(code); });
+    });
+    expect(duplicateExit).toBe(0); expect(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1); checks++;
+    await fs.writeFile(path.join(folder, 'result.json'), JSON.stringify({ status: 'passed', checks, packaged: Boolean(packaged), hardwareAccess: false, consoleErrors: errors }, null, 2));
+    console.log(JSON.stringify({ status: 'passed', checks, folder, packaged: Boolean(packaged), hardwareAccess: false }));
+  } finally { await application.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

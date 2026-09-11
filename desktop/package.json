@@ -1,0 +1,42 @@
+{
+  "name": "hantek-studio",
+  "productName": "Hantek Studio",
+  "version": "0.1.0",
+  "description": "Local Hantek DSO5102P desktop capture and acquisition workspace",
+  "private": true,
+  "author": "Hantek Studio contributors",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "test:ui": "node tests/desktop-smoke.cjs",
+    "package:win": "electron-builder --win portable --x64 --publish never"
+  },
+  "dependencies": {
+    "lucide-react": "^0.577.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3",
+    "typescript": "^5.9.3",
+    "vite": "8.3.0"
+  },
+  "build": {
+    "appId": "local.hantek.studio",
+    "productName": "Hantek Studio",
+    "directories": { "output": "release", "buildResources": "assets" },
+    "files": ["dist/**/*", "electron/**/*", "assets/icon.png", "package.json"],
+    "extraResources": [{ "from": "../.local/build/scope-bridge", "to": "scope-bridge", "filter": ["**/*"] }],
+    "asar": true,
+    "win": { "target": [{ "target": "portable", "arch": ["x64"] }], "signExecutable": false, "icon": "assets/icon.ico" },
+    "portable": { "artifactName": "Hantek-Studio-${version}-Windows.exe", "requestExecutionLevel": "user" }
+  }
+}

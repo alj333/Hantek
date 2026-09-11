@@ -4,6 +4,20 @@ Local Windows tools for an AI agent or a person to inspect and control a
 USB-connected Hantek DSO5102P. The scope performs signal acquisition; this
 repository handles communication, screenshots and explicit acquisition control.
 
+## Desktop app
+
+**Hantek Studio** is the standalone Windows React desktop app in `desktop/`.
+Open `desktop/release/Hantek-Studio-0.1.0-Windows.exe` after building, or run
+`scripts/start-desktop.ps1`. Its Python runtime is included in the package.
+
+The app provides a scope screen workspace with automatic preview, explicit
+Run/Stop, a saved-capture library with titles and notes, PNG export, connection
+settings and a clearly labelled demo mode. Read the
+[desktop user and build guide](docs/DESKTOP_APP.md) for details.
+
+The AI tools below remain available alongside the app. Pause automatic preview
+and disconnect the app before an agent takes over the USB connection.
+
 ## What works
 
 Verified on the owner's DSO5102P with Windows 11 x64 on 11 September 2026:
@@ -82,6 +96,7 @@ descriptor before sending a scope command.
 ## Repository guide
 
 - [AGENTS.md](AGENTS.md): instructions for agents working on or using these tools.
+- [Desktop app](docs/DESKTOP_APP.md): launch, capture library, build and packaging.
 - [Windows setup](docs/SETUP_WINDOWS.md): driver binding, administrator approval,
   port changes and recovery.
 - [Operating guide](docs/OPERATIONS.md): captures, state changes and integration.

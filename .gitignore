@@ -19,3 +19,10 @@ venv/
 *.pdf
 *.wire.bin
 *.rgb565
+node_modules/
+desktop/dist/
+desktop/release/
+desktop/.vite/
+desktop/test-results/
+desktop/playwright-report/
+*.tsbuildinfo

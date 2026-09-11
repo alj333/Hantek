@@ -70,3 +70,26 @@ validation in `docs/sessions/`, with local evidence paths and a clear distinctio
 between USB/screen verification and measurement accuracy. Update setup and
 operating instructions when behavior changes. Do not rerun state-changing
 hardware tests solely because files were moved or documentation changed.
+
+## Desktop app and AI tools
+
+The user app is `desktop/` (React and Electron); `src/desktop_bridge.py` reuses
+the existing scope client. Keep both the desktop app and AI CLI functional.
+Read `docs/DESKTOP_APP.md` before changing their integration.
+
+- Preserve the renderer sandbox, context isolation, trusted main-frame IPC,
+  fixed subprocess arguments, request validation, size/deadline bounds and
+  single-operation guard. The app has no network service or AI-provider key.
+- Demo mode must never open hardware or masquerade as a real measurement.
+- Automatic preview is off on startup and stops on failure/disconnection. Its
+  rolling scratch files are disposable; Save capture retains permanent evidence.
+  Never apply preview cleanup to saved captures or the historical archive.
+- The app's bundled Python and Electron runtimes are authorized build outputs,
+  saved under ignored build/release directories. Do not add them to Git or
+  include the archived vendor downloads in the package.
+- For app changes run the Python suite, `npm test` and `npm run build` under
+  `desktop/`, then appropriate demo UI checks (`npm run test:ui`). Packaged tests
+  use `HANTEK_TEST_EXECUTABLE` to target the unpacked app executable.
+- `desktop/tests/hardware-readonly.cjs --live` is an explicit live check, excluded
+  from offline builds. It reads identity and screenshots only. Never enable live
+  hardware checks in ordinary tests or substitute demo results for device proof.

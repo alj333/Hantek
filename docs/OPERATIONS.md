@@ -85,8 +85,9 @@ directory. Use absolute paths for unambiguous cross-project work.
 
 ## Current limitations
 
-Only the five established live device commands are supported. There is no continuous live
-viewer, generic panel control, raw waveform acquisition, firmware management,
+Only the five established live device commands are supported. The
+[desktop app](DESKTOP_APP.md) adds periodic screen previews and a capture
+library around them. There is no generic panel control, raw waveform acquisition, firmware management,
 scope filesystem access, shell access or remote network endpoint. Add future
 capabilities as individually bounded operations, with offline protocol tests
 and a specific live validation procedure.
