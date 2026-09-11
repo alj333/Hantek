@@ -1,0 +1,21 @@
+# Local instrument captures, device identities, setup logs and vendor downloads.
+.local/
+artifacts/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Vendor packages, licensed reference media and native build outputs stay local.
+*.exe
+*.dll
+*.sys
+*.cat
+*.zip
+*.rar
+*.pdf
+*.wire.bin
+*.rgb565
