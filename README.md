@@ -35,10 +35,15 @@ The scope was left acquiring in Auto mode after the test.
 
 Version 0.2 adds channel scale/position, timebase, trigger controls, ordinary
 menus and their soft keys. These are **relative panel gestures**, with a fresh
-screen after each desktop action. Absolute voltage/timebase setters and reliable
-numeric settings readback are not claimed. See the [control guide](docs/CONTROLS.md)
+screen after each desktop action. See the [control guide](docs/CONTROLS.md)
 and [validation checklist](docs/CONTROLS_CHECKLIST.md) for what has been checked
 and what still needs the physical bench.
+
+The AI CLI additionally provides profile-checked numeric `settings` and
+`configure` from a JSON target file. It can select supported channel ranges,
+positions, timebase and Edge-trigger values, checking fresh instrument readback
+after each gesture. See [AI setup by named values](docs/AI_SETUP.md) for accepted
+values, prerequisites and evidence. The desktop 0.2 controls remain relative.
 
 Raw waveform extraction and signal analysis are not implemented. A screenshot
 contains displayed pixels, not original waveform samples. Other Hantek models
@@ -56,6 +61,7 @@ Set-Location C:\Github\Hantek
 .\scripts\scope.ps1 echo
 .\scripts\scope.ps1 screenshot
 .\scripts\scope.ps1 controls
+.\scripts\scope.ps1 setup-capabilities
 ```
 
 The launcher finds a usable Python 3.8+ runtime; it accepts `-PythonPath` or
@@ -63,7 +69,7 @@ The launcher finds a usable Python 3.8+ runtime; it accepts `-PythonPath` or
 standard library. Python 3.12 x64 was used for the live validation.
 
 New screenshots and their supporting records go to `artifacts/captures/`.
-Acquisition, panel-control and raw-settings commands write records to `artifacts/logs/`. Both are
+Acquisition, panel-control and settings commands write records to `artifacts/logs/`. Both are
 ignored by Git. Normal operation needs no administrator rights, Hantek desktop
 application, Pi, SSH connection or network service.
 
@@ -109,6 +115,7 @@ descriptor before sending a scope command.
 - [Operating guide](docs/OPERATIONS.md): captures, state changes and integration.
 - [Protocol notes](docs/PROTOCOL.md): known commands, framing and limitations.
 - [Instrument controls](docs/CONTROLS.md): desktop controls and AI command examples.
+- [AI setup](docs/AI_SETUP.md): read named values and apply a checked settings file.
 - [Bench checklist](docs/CONTROLS_CHECKLIST.md): remaining hands-on validation.
 - [Initial validation record](docs/sessions/2026-09-11.md): evidence and lessons
   from the first connection.

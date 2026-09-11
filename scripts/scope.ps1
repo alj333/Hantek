@@ -21,7 +21,7 @@ pwsh -File C:\Github\Hantek\scripts\scope.ps1 acquisition-stop -LogDir .\measure
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('identify', 'echo', 'screenshot', 'acquisition-start', 'acquisition-stop', 'controls', 'panel-control', 'read-settings')]
+    [ValidateSet('identify', 'echo', 'screenshot', 'acquisition-start', 'acquisition-stop', 'controls', 'panel-control', 'read-settings', 'read-protocol', 'settings', 'configure', 'validate-setup', 'setup-capabilities')]
     [string]$Action,
     [Parameter(Position = 1)]
     [string]$Control,
@@ -31,6 +31,7 @@ param(
     [string]$InterfaceGuid,
     [string]$OutputDir,
     [string]$LogDir,
+    [string]$SettingsFile,
     [Alias('h')]
     [switch]$Help
 )
@@ -45,6 +46,8 @@ Hantek DSO5102P scope client (PowerShell 7, Python 3.8+)
 Usage: scope.ps1 <action> [options]
 Actions: identify, echo, screenshot, acquisition-start, acquisition-stop
          controls (offline), panel-control, read-settings (raw SYSData)
+         settings (decoded), configure, validate-setup (offline), setup-capabilities (offline)
+         read-protocol (read-only instrument settings description)
 Acquisition actions affect the oscilloscope only, never a CNC machine.
 Panel actions are named ordinary gestures; inspect the screen to verify results.
 
@@ -54,6 +57,7 @@ Panel actions are named ordinary gestures; inspect the screen to verify results.
 -LogDir           Acquisition, panel and settings records; otherwise artifacts/logs.
 -Control          Named panel control; use controls to list IDs without accessing USB.
 -Count            Panel rotary gestures 1..5; buttons accept exactly 1 (default).
+-SettingsFile     JSON settings document for configure or validate-setup.
 -Help             Show this help without accessing USB.
 
 Python discovery: configured path, installed python/python3, py -3, bundled
@@ -64,6 +68,7 @@ Example:
   pwsh -File '$PSCommandPath' screenshot -OutputDir .\measurements
   pwsh -File '$PSCommandPath' controls
   pwsh -File '$PSCommandPath' panel-control -Control ch1-scale-plus -Count 1
+  pwsh -File '$PSCommandPath' configure -SettingsFile .\scope-setup.json
 "@
     exit 0
 }
@@ -78,8 +83,13 @@ if ($Action -eq 'panel-control') {
 if ($PSBoundParameters.ContainsKey('OutputDir') -and $Action -ne 'screenshot') {
     throw '-OutputDir applies only to screenshot.'
 }
-if ($PSBoundParameters.ContainsKey('LogDir') -and $Action -notin @('acquisition-start', 'acquisition-stop', 'panel-control', 'read-settings')) {
-    throw '-LogDir applies only to acquisition, panel-control or read-settings actions.'
+if ($PSBoundParameters.ContainsKey('LogDir') -and $Action -notin @('acquisition-start', 'acquisition-stop', 'panel-control', 'read-settings', 'read-protocol', 'settings', 'configure')) {
+    throw '-LogDir applies only to acquisition, panel, settings, protocol or configure actions.'
+}
+if ($Action -in @('configure', 'validate-setup')) {
+    if ([string]::IsNullOrWhiteSpace($SettingsFile)) { throw "$Action requires -SettingsFile." }
+} elseif ($PSBoundParameters.ContainsKey('SettingsFile')) {
+    throw '-SettingsFile applies only to configure or validate-setup.'
 }
 foreach ($directoryParameter in @('OutputDir', 'LogDir')) {
     if ($PSBoundParameters.ContainsKey($directoryParameter) -and
@@ -96,7 +106,8 @@ $scopeGuid = if ($PSBoundParameters.ContainsKey('InterfaceGuid')) {
     '5cb35641-beea-4a98-b06b-3cf4dca1911b'
 }
 $parsedScopeGuid = [guid]::Empty
-if ($Action -ne 'controls' -and ([string]::IsNullOrWhiteSpace($scopeGuid) -or
+$offlineAction = $Action -in @('controls', 'setup-capabilities', 'validate-setup')
+if (-not $offlineAction -and ([string]::IsNullOrWhiteSpace($scopeGuid) -or
     -not [guid]::TryParse($scopeGuid.Trim(), [ref]$parsedScopeGuid))) {
     throw 'Invalid interface GUID. Set -InterfaceGuid or HANTEK_INTERFACE_GUID to a valid GUID.'
 }
@@ -156,9 +167,12 @@ if (-not (Test-Path -LiteralPath $scopeClient -PathType Leaf)) {
     throw "Hantek client not found: $scopeClient"
 }
 $clientArguments = @($runtime.Prefix) + @($scopeClient)
-if ($Action -ne 'controls') { $clientArguments += @('--guid', $parsedScopeGuid.ToString()) }
+if (-not $offlineAction) { $clientArguments += @('--guid', $parsedScopeGuid.ToString()) }
 $clientArguments += @($Action)
 if ($Action -eq 'panel-control') { $clientArguments += @($Control, '--count', [string]$Count) }
+if ($Action -in @('configure', 'validate-setup')) {
+    $clientArguments += @('--settings-file', $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SettingsFile))
+}
 if ($PSBoundParameters.ContainsKey('OutputDir')) {
     $clientArguments += @('--output-dir', $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir))
 }

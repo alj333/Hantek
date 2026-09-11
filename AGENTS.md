@@ -29,6 +29,23 @@ firmware behaves identically. Do not claim compatibility without evidence.
   Never infer absolute numeric settings from a gesture count or a short reply.
 - `controls` lists capabilities offline. `read-settings` records a bounded raw
   settings reply without claiming a firmware-independent numeric interpretation.
+- Read `docs/AI_SETUP.md` before using named numeric settings. `settings` validates
+  the actual instrument schema and returns supported values plus warnings.
+  `setup-capabilities` and `validate-setup -SettingsFile ...` are offline launcher
+  actions; `configure -SettingsFile ...` changes ordinary scope settings only
+  within the user's authorized measurement task. Use supported exact values,
+  inspect the final readback and save a separate screen for visual evidence.
+  Inside `configure`, validated settings readback supplies the observation
+  between gestures; the separate screen is checked after the operation.
+- Keep each numeric setup on one exclusive device handle, validate the schema
+  first, journal before every gesture and verify fresh settings after it. Unknown
+  dependencies, unexpected progress, unrelated changes or deadlines must abort.
+  Never round a target silently, retry automatically, or infer that partial
+  changes were rolled back. The desktop 0.2 UI remains relative.
+- Preserve the numeric workflow's USB BCD `2430` restriction and exact schema
+  hash check. A matching layout on another model does not validate its units or
+  range tables. Include the desired trigger threshold explicitly when it must
+  remain exact across source-scale changes; unrequested thresholds may quantize.
 - Do not manipulate a Windows administrator/security approval dialog. Let the
   user approve it. If it is cancelled, stop that action and explain the result.
 

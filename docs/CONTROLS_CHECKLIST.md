@@ -74,6 +74,8 @@ reply or next image failed. Do not retry a setting change automatically.
   folder. Do not add real device identifiers or captures to Git.
 - [ ] Rebuild the desktop if the catalog or implementation changes.
 
-Numeric settings decoding, absolute setpoints, preset restoration and waveform
-export are future implementation work, not features to mark passed from a
-front-panel gesture test.
+The AI CLI now provides fixed-profile numeric readback and bounded named-value
+configuration; see [AI setup](AI_SETUP.md) and
+[its separate validation record](sessions/2026-09-12-ai-setup.md). A panel-gesture
+check alone does not validate that entire workflow or all numeric ranges.
+General preset restoration and waveform export remain future work.

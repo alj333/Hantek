@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "settings": {
+    "ch1.volts_per_div": 1.0,
+    "ch1.position_div": -0.16,
+    "ch1.coupling": "dc",
+    "horizontal.seconds_per_div": 0.0008,
+    "trigger.type": "edge",
+    "trigger.source": "ch1",
+    "trigger.mode": "auto",
+    "trigger.slope": "rising",
+    "trigger.coupling": "dc",
+    "trigger.level_volts": 1.32
+  }
+}

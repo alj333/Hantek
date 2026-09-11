@@ -50,6 +50,10 @@ not a complete emulation of Hantek firmware. Demo images retain their DEMO label
 
 ## AI command line
 
+For actual channel ranges, timebase or Edge-trigger values, use the separate
+[AI setup guide](AI_SETUP.md). The commands below remain the direct relative
+gesture interface used by the desktop.
+
 List the exact supported IDs without touching hardware:
 
 ```powershell
@@ -102,11 +106,11 @@ evidence; never bypass packet or image checksum validation.
 
 ## Deliberate limits
 
-Absolute voltage/timebase setters and settings restoration are not implemented:
-the source implementations report firmware-dependent settings layouts and
-unreliable scale fields. Raw waveform export and computed signal analysis also
-remain separate future work. Use the scope's measurement/FFT menus for their
-displayed results.
+The desktop controls remain relative. Profile-checked numeric settings and
+bounded named-value configuration are available through the [AI CLI](AI_SETUP.md),
+with firmware validation and fresh readback after each gesture. General settings
+restoration, raw waveform export and computed signal analysis remain separate
+future work. Use the scope's measurement/FFT menus for their displayed results.
 
 Utility, Save/Recall, Save to USB, Default Setup, Probe Check and undocumented
 F0/F6/F7 functions are absent. Firmware, factory reset, calibration, instrument

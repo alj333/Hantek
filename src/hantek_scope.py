@@ -2,9 +2,9 @@
 
 Identify reads USB descriptors. Echo and screenshot leave acquisition unchanged.
 Explicit acquisition and named ordinary panel commands change only this scope.
-Raw settings readback makes no assumptions about field layout or units.
+Raw readback and profile-specific AI setup are available separately.
 These operations are unrelated to CNC machine operation. No panel locks,
-instrument filesystem access, shell/debug commands, resets, firmware operations,
+instrument file writes, shell/debug commands, resets, firmware operations,
 or driver installation are implemented.
 
 Protocol evidence (not vendor-authorized API documentation):
@@ -49,6 +49,8 @@ OBSERVED_ASYNC_ACKS = frozenset((b"\x00", b"\x01\x00"))
 MAX_ASYNC_ACKS = 8
 MAX_SETTINGS_BYTES = 65533  # One maximum-length frame minus command/checksum.
 MAX_CONTROL_WIRE_BYTES = 65536
+PROTOCOL_PATH_PAYLOAD = b"\x00/protocol.inf"
+MAX_PROTOCOL_BYTES = 16384
 PANEL_SETTLE_SECONDS = 0.2
 DEFAULT_INTERFACE_GUID = "5cb35641-beea-4a98-b06b-3cf4dca1911b"
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -78,12 +80,14 @@ def output_directory(value):
 
 def request_packet(command, payload=b""):
     """Allow observational requests and the two explicit acquisition actions."""
-    if command not in (0x00, 0x01, 0x12, 0x13, 0x20):
+    if command not in (0x00, 0x01, 0x10, 0x12, 0x13, 0x20):
         raise ScopeError("Command is outside the scope allowlist")
     if command == 0x12 and payload not in (b"\x00\x00", b"\x00\x01"):
         raise ScopeError("Only scope acquisition start/stop payloads are allowed")
     if command == 0x13 and not scope_controls.allowed_payload(payload):
         raise ScopeError("Only catalogued ordinary panel keys with a single press are allowed")
+    if command == 0x10 and payload != PROTOCOL_PATH_PAYLOAD:
+        raise ScopeError("Only the fixed read-only /protocol.inf description may be requested")
     if (command in (0x01, 0x20) and payload) or len(payload) > 256:
         raise ScopeError("Invalid request payload")
     packet = b"\x53" + struct.pack("<H", len(payload) + 2)
@@ -458,7 +462,7 @@ def _check_transaction_deadline(deadline):
         raise ScopeError("Transaction exceeded its 30-second deadline; no further gesture sent")
 
 
-def panel_control(device, control_id, count, log_dir):
+def panel_control(device, control_id, count, log_dir, *, emit=True, overall_deadline=None):
     """Send only explicitly requested gestures, preserving each progress stage.
 
     Normal 0x93 contains a pre-action menu ID, not proof of execution. A single
@@ -488,6 +492,8 @@ def panel_control(device, control_id, count, log_dir):
     try:
         with wire_path.open("xb") as wire:
             deadline = time.monotonic() + TRANSACTION_SECONDS
+            if overall_deadline is not None:
+                deadline = min(deadline, overall_deadline)
             reader = FrameReader(device.read, deadline, wire,
                                  max_wire_bytes=MAX_CONTROL_WIRE_BYTES, max_frames=32)
             for index in range(count):
@@ -545,10 +551,12 @@ def panel_control(device, control_id, count, log_dir):
         try:
             _write_operation_record(log_path, metadata)
         finally:
-            print(json.dumps(metadata, indent=2))
+            if emit:
+                print(json.dumps(metadata, indent=2))
+    return metadata
 
 
-def read_settings(device, log_dir):
+def read_settings(device, log_dir, *, emit=True, overall_deadline=None):
     """Preserve one normal SYSData reply without assuming a firmware layout."""
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
@@ -568,6 +576,10 @@ def read_settings(device, log_dir):
     try:
         with wire_path.open("xb") as wire:
             deadline = time.monotonic() + TRANSACTION_SECONDS
+            if overall_deadline is not None:
+                deadline = min(deadline, overall_deadline)
+            if time.monotonic() >= deadline:
+                raise ScopeError("Settings read exceeded the setup deadline")
             reader = FrameReader(device.read, deadline, wire,
                                  max_wire_bytes=MAX_SETTINGS_BYTES + 5 + 8 * 7,
                                  max_frames=10)
@@ -596,7 +608,65 @@ def read_settings(device, log_dir):
         try:
             _write_operation_record(log_path, metadata)
         finally:
+            if emit:
+                print(json.dumps(metadata, indent=2))
+    return metadata
+
+
+def protocol_bytes(reader, raw_sink):
+    """Bounded read-only description transfer; no arbitrary file API."""
+    result = bytearray()
+    while True:
+        payload = reader.next(0x90, allow_observed_async_ack=True)
+        if payload[:1] == b"\x01":
+            if len(payload) == 1 or len(result) + len(payload) - 1 > MAX_PROTOCOL_BYTES:
+                raise ScopeError("Protocol description chunk is empty or exceeds its limit")
+            raw_sink.write(payload[1:])
+            result.extend(payload[1:])
+        elif payload[:1] == b"\x02" and len(payload) == 2:
+            if not result or sum(result) & 255 != payload[1]:
+                raise ScopeError("Protocol description is missing or has a bulk checksum mismatch")
+            if reader.buffer:
+                raise ScopeError("Unexpected trailing protocol description data")
+            return bytes(result)
+        else:
+            raise ScopeError("Unexpected protocol description response")
+
+
+def read_protocol(device, log_dir, *, emit=True, overall_deadline=None):
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    base = log_dir / ("read-protocol-" + stamp)
+    raw_path, wire_path, log_path = (Path(str(base) + suffix) for suffix in (".protocol.txt", ".wire.bin", ".json"))
+    metadata = {"command": "read-protocol", "requested_at_utc": stamp,
+                "device": device.metadata, "instrument_settings_changed": False,
+                "status": "incomplete", "request_hex": request_packet(0x10, PROTOCOL_PATH_PAYLOAD).hex(),
+                "raw_path": str(raw_path), "wire_path": str(wire_path), "log_path": str(log_path)}
+    _write_operation_record(log_path, metadata, "x")
+    reader = None
+    try:
+        with raw_path.open("xb") as raw, wire_path.open("xb") as wire:
+            deadline = time.monotonic() + TRANSACTION_SECONDS
+            if overall_deadline is not None:
+                deadline = min(deadline, overall_deadline)
+            if time.monotonic() >= deadline:
+                raise ScopeError("Protocol read exceeded the setup deadline")
+            reader = FrameReader(device.read, deadline, wire,
+                                 max_wire_bytes=MAX_PROTOCOL_BYTES + 8192, max_frames=64)
+            device.send(0x10, PROTOCOL_PATH_PAYLOAD)
+            data = protocol_bytes(reader, raw)
+        metadata.update(status="complete", payload_bytes=len(data),
+                        sha256=hashlib.sha256(data).hexdigest(), packet_and_bulk_checksums="verified")
+    except (Exception, KeyboardInterrupt) as error:
+        metadata["error"] = str(error) or type(error).__name__
+        raise
+    finally:
+        if reader:
+            metadata.update(asynchronous_ack_packets=reader.async_ack_packets, received_bytes=reader.total)
+        _write_operation_record(log_path, metadata)
+        if emit:
             print(json.dumps(metadata, indent=2))
+    return metadata
 
 
 def parse_arguments(argv=None):
@@ -606,12 +676,22 @@ def parse_arguments(argv=None):
     commands.add_parser("identify", help="Read USB descriptors; no scope protocol command")
     commands.add_parser("echo", help="One unique normal-protocol echo test")
     commands.add_parser("controls", help="List named ordinary controls; never accesses USB")
+    commands.add_parser("setup-capabilities", help="List supported numeric setup fields offline")
+    for command in ("configure", "validate-setup"):
+        setup_parser = commands.add_parser(command, help="Apply a checked settings file" if command == "configure" else "Validate a settings file offline")
+        setup_parser.add_argument("--settings-file", type=Path, required=True)
+        if command == "configure":
+            setup_parser.add_argument("--log-dir", type=output_directory, default=DEFAULT_LOG_DIR)
+    decoded = commands.add_parser("settings", help="Read profile-checked settings with units and warnings")
+    decoded.add_argument("--log-dir", type=output_directory, default=DEFAULT_LOG_DIR)
     panel = commands.add_parser("panel-control", help="Send a named ordinary panel gesture; verify the scope screen")
     panel.add_argument("control", help="Named control ID from the offline controls catalog")
     panel.add_argument("--count", type=int, default=1, help="Rotary gestures 1..5; buttons exactly 1")
     panel.add_argument("--log-dir", type=output_directory, default=DEFAULT_LOG_DIR)
     settings = commands.add_parser("read-settings", help="Save bounded raw SYSData; no numeric decoding")
     settings.add_argument("--log-dir", type=output_directory, default=DEFAULT_LOG_DIR)
+    protocol = commands.add_parser("read-protocol", help="Read only the instrument's /protocol.inf field description")
+    protocol.add_argument("--log-dir", type=output_directory, default=DEFAULT_LOG_DIR)
     for action in ("acquisition-start", "acquisition-stop"):
         action_parser = commands.add_parser(
             action, help="Explicitly change oscilloscope acquisition; never operates a CNC")
@@ -630,7 +710,13 @@ def parse_arguments(argv=None):
             scope_controls.control_spec(args.control, args.count)
         except ValueError as error:
             parser.error(str(error))
-    if args.command not in ("decode", "controls"):
+    if args.command in ("configure", "validate-setup"):
+        import scope_ai
+        try:
+            args.target = scope_ai.load_target(args.settings_file)
+        except (ValueError, OSError) as error:
+            parser.error(str(error))
+    if args.command not in ("decode", "controls", "setup-capabilities", "validate-setup"):
         try:
             args.guid = configured_interface_guid(args.guid)
         except ValueError as error:
@@ -640,6 +726,14 @@ def parse_arguments(argv=None):
 
 def main(argv=None):
     args = parse_arguments(argv)
+    if args.command == "setup-capabilities":
+        import scope_setup
+        print(json.dumps(scope_setup.capabilities(), indent=2))
+        return
+    if args.command == "validate-setup":
+        print(json.dumps({"status": "valid", "hardware_access": False,
+                          "target": args.target, "note": "Device prerequisites are checked again before setup."}, indent=2))
+        return
     if args.command == "controls":
         print(json.dumps(scope_controls.public_catalog(), indent=2))
         return
@@ -650,7 +744,10 @@ def main(argv=None):
         print(json.dumps({"png": str(args.png.resolve()), "hardware_access": False}))
         return
     with WinUsbScope(args.guid) as scope:
-        if args.command == "identify":
+        if args.command in ("settings", "configure"):
+            import scope_ai
+            scope_ai.run(sys.modules[__name__], scope, args)
+        elif args.command == "identify":
             print(json.dumps(scope.metadata, indent=2))
         elif args.command == "echo":
             token = ("scope-check-" + secrets.token_hex(8)).encode("ascii")
@@ -666,6 +763,8 @@ def main(argv=None):
             panel_control(scope, args.control, args.count, args.log_dir)
         elif args.command == "read-settings":
             read_settings(scope, args.log_dir)
+        elif args.command == "read-protocol":
+            read_protocol(scope, args.log_dir)
         elif args.command in ("acquisition-start", "acquisition-stop"):
             args.log_dir.mkdir(parents=True, exist_ok=True)
             stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")

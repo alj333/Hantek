@@ -34,11 +34,14 @@ protocol frames independently of transfer boundaries.
 | Start scope acquisition | `0x12` | `00 00` | Known short `0x92` replies |
 | Stop scope acquisition | `0x12` | `00 01` | Known short `0x92` replies |
 | Read settings record | `0x01` | Empty | Bounded raw `0x81` reply |
+| Read profile description | `0x10` | Exact allowlisted `/protocol.inf` request | `0x90` chunks and checksum completion |
 | Named panel gesture | `0x13` | Allowlisted key ID, `01` | `0x93`; interpretation is documented below |
 
 All other commands/payloads are rejected. In particular, panel-lock values of
 `0x12` are excluded. `identify` only reads USB metadata. `controls` returns the
 shared control catalog offline, and `decode` never opens USB.
+`setup-capabilities` and `validate-setup` are also offline. The file request is
+not a general file API: callers cannot supply another path or write a file.
 
 ## Ordinary front-panel control
 
@@ -67,8 +70,43 @@ menu. A reply obtained after sending a soft key cannot preflight that same key.
 
 `0x01` returns a firmware-specific settings blob. Preserve it and its wire bytes
 with size/checksum validation; do not apply related-model offsets or scale tables
-as if they were validated on this DSO5102P. There is no SYSData settings write,
-automatic convergence loop, preset restore or raw waveform transfer here.
+as if they were validated on this DSO5102P. The numeric AI workflow below uses a
+separately validated fixed profile. There is no SYSData settings write, preset
+restore or raw waveform transfer here.
+
+## Fixed-profile AI setup
+
+`src/scope_settings.py` decodes the exact 208-byte, 119-field profile identified
+by schema SHA-256
+`fbd58fa396f2e3922fcd8b9000ba505eb627ee162956937ce1a1f8b07169995d`.
+Each live `settings` or `configure` invocation fetches `/protocol.inf` on the
+same exclusive handle and checks this hash before interpreting settings.
+Numeric setup additionally requires the tested device-release descriptor BCD
+`2430` with VID `049F` / PID `505A`. The schema hash is not proof that another
+model has the same units, range tables or semantics.
+The schema transfer requires valid framing and bulk checksum, bounded size and
+completion, and no trailing data. A 200 ms settling interval follows this bulk
+response before the next request. No vendor schema asset is shipped in Git.
+The setup adapter also waits 200 ms after each settings read and panel echo
+before issuing its next operation; this pacing avoids the observed next-command
+timeout while preserving all reply checks and deadlines.
+
+All raw fields are retained. Only supported enumerations and SI values appear
+in named state; unsupported or unreliable fields are omitted with warnings.
+Displayed channel scale includes the probe factor. Coarse voltage ranges,
+2/4/8 timebase steps, positions and Edge threshold mapping are documented in
+[AI setup](AI_SETUP.md), with exact-unit evidence in
+[the session record](sessions/2026-09-12-ai-setup.md).
+
+`src/scope_setup.py` converges only through named single panel gestures. It
+validates a target, reads current settings, journals the next gesture, waits
+for the normal panel/echo exchange, and reads settings again. Each step must
+show expected progress without disallowed unrelated changes. The transaction
+is bounded to 80 gestures and 120 seconds. It never writes the full SYSData blob,
+resends a failed gesture, rolls back implicitly or reports success from `0x93`.
+Requested final settings are compared with fresh readback; this is instrument
+configuration verification, not measurement calibration. Hantek Studio 0.2's
+relative control interface remains unchanged.
 
 ## Screenshot rules
 

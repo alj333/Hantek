@@ -14,7 +14,9 @@ Give another project's agent this instruction, adapting the output path:
 > artifacts in this project's `artifacts\scope` directory. Change acquisition
 > state or ordinary scope settings only when this task calls for it. Read the
 > control guide before using named panel gestures; inspect a fresh screenshot
-> after each action. Report actual evidence and limitations.
+> after each action. For actual ranges or Edge-trigger values, read `docs/AI_SETUP.md`,
+> use `settings`, validate a target file, then `configure` within this task's
+> authorization. Report actual evidence and limitations.
 
 Before probing a device, establish the signal type, voltage, reference/ground,
 probe attenuation and bandwidth requirements with the operator. This repository
@@ -29,6 +31,8 @@ safely be measured.
 3. Use `echo` for a basic round-trip check, then `screenshot` to read the display.
 4. Inspect the screen and record relevant channel, range, timebase and probe
    settings. Pixel capture alone does not establish trustworthy numeric data.
+   Use `settings` for the supported profile's named readback and inspect its
+   warnings. Use [AI setup](AI_SETUP.md) when the task calls for specific values.
 5. If authorized to freeze acquisition, capture the initial state, run
    `acquisition-stop`, then take another screenshot. Resume with
    `acquisition-start` when required and verify the resulting indicator.
@@ -78,6 +82,7 @@ storage; review them before sharing or adding them to Git.
 - `-InterfaceGuid` / Python `--guid` selects an explicitly configured interface.
 - Otherwise `HANTEK_INTERFACE_GUID` takes precedence over the dedicated default.
 - `-OutputDir` and `-LogDir` direct artifacts to another project.
+- `-SettingsFile` supplies the JSON target to `configure` or offline `validate-setup`.
 - Direct Python invocation exposes equivalent `--output-dir` / `--log-dir`
   arguments on the relevant subcommands.
 
@@ -92,6 +97,10 @@ bounded panel gestures and raw settings records, described in
 [Instrument controls](CONTROLS.md). The [desktop app](DESKTOP_APP.md) provides a
 Controls view, screen previews and a capture library around the same client.
 There is no arbitrary command/key passthrough, calibrated numeric readback,
-raw waveform acquisition, firmware management, scope filesystem access, shell
-access or remote network endpoint. Keep new capabilities individually bounded
+raw waveform acquisition, firmware management, arbitrary scope filesystem access,
+shell access or remote network endpoint. Profile-checked `settings` and bounded
+`configure` are available through the [AI setup commands](AI_SETUP.md). They
+read the fixed `/protocol.inf` schema and verify named settings after each
+gesture; they do not calibrate measurements or write a settings blob.
+Keep new capabilities individually bounded
 and distinguish offline checks from actual bench validation.
