@@ -18,8 +18,10 @@ import hantek_scope as scope
 
 PROTOCOL_VERSION = 1
 MAX_REQUEST_BYTES = 16 * 1024
-ACTIONS = ("identify", "echo", "screenshot", "acquisition-start", "acquisition-stop")
-REQUEST_KEYS = frozenset(("action", "guid", "output_dir", "log_dir"))
+ACTIONS = ("identify", "echo", "screenshot", "acquisition-start", "acquisition-stop",
+           "controls", "panel-control", "read-settings")
+REQUEST_KEYS = frozenset(("action", "guid", "output_dir", "log_dir", "control", "count"))
+LOG_ACTIONS = ("acquisition-start", "acquisition-stop", "panel-control", "read-settings")
 
 
 class RequestError(ValueError):
@@ -104,6 +106,17 @@ def validated_arguments(request):
     action = request.get("action")
     if not isinstance(action, str) or action not in ACTIONS:
         raise RequestError("Unsupported action. Allowed actions: " + ", ".join(ACTIONS))
+    if action == "controls":
+        if set(request) != {"action"}:
+            raise RequestError("The offline controls action accepts no configuration or other arguments.")
+        return ["controls"]
+    if action != "panel-control" and ("control" in request or "count" in request):
+        raise RequestError("control and count are only valid for panel-control.")
+    if action == "panel-control":
+        try:
+            scope.scope_controls.control_spec(request.get("control"), request.get("count", 1))
+        except ValueError as error:
+            raise RequestError(str(error)) from error
     if "guid" in request and (not isinstance(request["guid"], str) or not request["guid"].strip()):
         raise RequestError("guid must be a nonempty UUID string.")
     try:
@@ -114,14 +127,16 @@ def validated_arguments(request):
         raise RequestError("Invalid interface GUID configuration.") from error
     if "output_dir" in request and action != "screenshot":
         raise RequestError("output_dir is only valid for screenshot.")
-    if "log_dir" in request and action not in ("acquisition-start", "acquisition-stop"):
-        raise RequestError("log_dir is only valid for acquisition actions.")
+    if "log_dir" in request and action not in LOG_ACTIONS:
+        raise RequestError("log_dir is only valid for acquisition, panel-control or read-settings actions.")
     arguments = ["--guid", guid, action]
+    if action == "panel-control":
+        arguments.extend((request["control"], "--count", str(request.get("count", 1))))
     if action == "screenshot":
         if "output_dir" not in request:
             raise RequestError("screenshot requires output_dir.")
         arguments.extend(("--output-dir", _directory(request["output_dir"], "output_dir")))
-    elif action in ("acquisition-start", "acquisition-stop"):
+    elif action in LOG_ACTIONS:
         if "log_dir" not in request:
             raise RequestError(action + " requires log_dir.")
         arguments.extend(("--log-dir", _directory(request["log_dir"], "log_dir")))
@@ -169,10 +184,14 @@ def handle_request(request):
 
 def self_test():
     """Static build/runtime information only; deliberately does not inspect USB."""
+    catalog = scope.scope_controls.public_catalog()
     return {
         "protocol_version": PROTOCOL_VERSION,
         "hardware_access": False,
         "actions": list(ACTIONS),
+        "control_catalog": {"schema_version": catalog["schema_version"],
+                            "count": len(catalog["controls"]),
+                            "validation": catalog["validation"]},
         "runtime": {"python": platform.python_version(),
                     "implementation": platform.python_implementation(),
                     "platform": sys.platform,

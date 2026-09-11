@@ -23,6 +23,20 @@ export interface Activity {
   kind: 'success' | 'info' | 'error';
   message: string;
 }
+export interface InstrumentControl {
+  id: string;
+  label: string;
+  group: string;
+  kind: 'button' | 'rotary';
+  description: string;
+  validation: 'bench-pending' | 'screen-verified';
+  maxCount: number;
+  contextDependent: boolean;
+}
+export interface ControlResult {
+  message: string;
+  capture: Capture | null;
+}
 export interface AppState {
   appVersion: string;
   settings: Settings;
@@ -31,6 +45,7 @@ export interface AppState {
   device: { model: string; vid: string; pid: string } | null;
   captures: Capture[];
   activity: Activity[];
+  controlCatalog: InstrumentControl[];
 }
 export interface ScopeAppApi {
   getState(): Promise<AppState>;
@@ -39,6 +54,8 @@ export interface ScopeAppApi {
   checkConnection(): Promise<{ message: string }>;
   capture(options?: { save?: boolean }): Promise<Capture>;
   setAcquisition(state: 'start' | 'stop'): Promise<{ message: string; capture: Capture | null }>;
+  panelAction(input: { control: string; count?: number }): Promise<ControlResult>;
+  readSettings(): Promise<{ message: string; record: Record<string, unknown> }>;
   updateSettings(patch: Partial<Pick<Settings, 'mode' | 'refreshIntervalMs' | 'interfaceGuid'>>): Promise<AppState>;
   chooseStorageDirectory(): Promise<AppState>;
   listCaptures(): Promise<Capture[]>;

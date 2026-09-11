@@ -2,17 +2,17 @@
 
 Local Windows tools for an AI agent or a person to inspect and control a
 USB-connected Hantek DSO5102P. The scope performs signal acquisition; this
-repository handles communication, screenshots and explicit acquisition control.
+repository handles communication, screenshots and ordinary front-panel control.
 
 ## Desktop app
 
 **Hantek Studio** is the standalone Windows React desktop app in `desktop/`.
-Open `desktop/release/Hantek-Studio-0.1.0-Windows.exe` after building, or run
+Open `desktop/release/Hantek-Studio-0.2.0-Windows.exe` after building, or run
 `scripts/start-desktop.ps1`. Its Python runtime is included in the package.
 
 The app provides a scope screen workspace with automatic preview, explicit
-Run/Stop, a saved-capture library with titles and notes, PNG export, connection
-settings and a clearly labelled demo mode. Read the
+Run/Stop, 39 named front-panel controls, a saved-capture library with titles and
+notes, PNG export, connection settings and a clearly labelled demo mode. Read the
 [desktop user and build guide](docs/DESKTOP_APP.md) for details.
 
 The AI tools below remain available alongside the app. Pause automatic preview
@@ -33,10 +33,16 @@ Verified on the owner's DSO5102P with Windows 11 x64 on 11 September 2026:
 Stop and resume were verified against the displayed acquisition indicators.
 The scope was left acquiring in Auto mode after the test.
 
-Voltage range, timebase, trigger adjustment, raw waveform extraction and signal
-analysis are **not implemented**. A screenshot contains displayed pixels, not
-the scope's original waveform samples. Other Hantek models and firmware versions
-have not been validated.
+Version 0.2 adds channel scale/position, timebase, trigger controls, ordinary
+menus and their soft keys. These are **relative panel gestures**, with a fresh
+screen after each desktop action. Absolute voltage/timebase setters and reliable
+numeric settings readback are not claimed. See the [control guide](docs/CONTROLS.md)
+and [validation checklist](docs/CONTROLS_CHECKLIST.md) for what has been checked
+and what still needs the physical bench.
+
+Raw waveform extraction and signal analysis are not implemented. A screenshot
+contains displayed pixels, not original waveform samples. Other Hantek models
+and firmware versions have not been validated.
 
 ## Quick start on the configured PC
 
@@ -49,6 +55,7 @@ Set-Location C:\Github\Hantek
 .\scripts\scope.ps1 identify
 .\scripts\scope.ps1 echo
 .\scripts\scope.ps1 screenshot
+.\scripts\scope.ps1 controls
 ```
 
 The launcher finds a usable Python 3.8+ runtime; it accepts `-PythonPath` or
@@ -56,7 +63,7 @@ The launcher finds a usable Python 3.8+ runtime; it accepts `-PythonPath` or
 standard library. Python 3.12 x64 was used for the live validation.
 
 New screenshots and their supporting records go to `artifacts/captures/`.
-Explicit acquisition commands write records to `artifacts/logs/`. Both are
+Acquisition, panel-control and raw-settings commands write records to `artifacts/logs/`. Both are
 ignored by Git. Normal operation needs no administrator rights, Hantek desktop
 application, Pi, SSH connection or network service.
 
@@ -101,6 +108,8 @@ descriptor before sending a scope command.
   port changes and recovery.
 - [Operating guide](docs/OPERATIONS.md): captures, state changes and integration.
 - [Protocol notes](docs/PROTOCOL.md): known commands, framing and limitations.
+- [Instrument controls](docs/CONTROLS.md): desktop controls and AI command examples.
+- [Bench checklist](docs/CONTROLS_CHECKLIST.md): remaining hands-on validation.
 - [Initial validation record](docs/sessions/2026-09-11.md): evidence and lessons
   from the first connection.
 - `src/`: scope client; `scripts/`: launch and driver-setup helpers; `tests/`:

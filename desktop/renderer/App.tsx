@@ -3,16 +3,17 @@ import {
   Activity as ActivityIcon, ArrowDownToLine, ArrowRight, Camera, Check,
   ChevronDown, Clock3, Folder, FolderOpen, Images, Info, LayoutDashboard,
   LoaderCircle, Monitor, Play, Plug, RefreshCw, Search, Settings2,
-  ShieldCheck, Square, Unplug, Usb, X,
+  ShieldCheck, SlidersHorizontal, Square, Unplug, Usb, X,
 } from 'lucide-react';
 import type { AppState, Capture, ScopeMode, Settings } from '../shared/contracts';
+import ControlsView, { type FrontPanelControl, type LastControlRequest } from './ControlsView';
 
-type View = 'workspace' | 'captures' | 'settings';
+type View = 'workspace' | 'controls' | 'captures' | 'settings';
 type Notice = { kind: 'success' | 'info' | 'error'; message: string };
 
 const EMPTY_STATE: AppState = {
   appVersion: '', settings: { mode: 'hardware', storageDir: '', refreshIntervalMs: 5000, interfaceGuid: '' },
-  connected: false, busy: false, device: null, captures: [], activity: [],
+  connected: false, busy: false, device: null, captures: [], activity: [], controlCatalog: [],
 };
 const dateTime = (value: string) => {
   const date = new Date(value);
@@ -51,8 +52,8 @@ function Graticule() {
   </svg>;
 }
 
-function Screen({ capture, connected, mode, now, interval }: {
-  capture: Capture | null; connected: boolean; mode: ScopeMode; now: number; interval: number;
+function Screen({ capture, connected, mode, now, interval, invalidated, reserveBelow }: {
+  capture: Capture | null; connected: boolean; mode: ScopeMode; now: number; interval: number; invalidated: boolean; reserveBelow?: number;
 }) {
   const stage = useRef<HTMLDivElement>(null);
   const [stageHeight, setStageHeight] = useState<number>();
@@ -61,11 +62,11 @@ function Screen({ capture, connected, mode, now, interval }: {
     if (!element) return;
     const top = element.getBoundingClientRect().top + window.scrollY;
     const footerHeight = element.nextElementSibling?.getBoundingClientRect().height ?? 36;
-    const noteHeight = element.parentElement?.nextElementSibling?.getBoundingClientRect().height ?? 55;
+    const noteHeight = reserveBelow ?? element.parentElement?.nextElementSibling?.getBoundingClientRect().height ?? 55;
     const available = window.innerHeight - top - footerHeight - noteHeight - 18;
     const height = Math.floor(Math.min(element.clientWidth * 480 / 800, Math.max(160, available)));
     setStageHeight((previous) => previous !== undefined && Math.abs(previous - height) < 2 ? previous : height);
-  }, []);
+  }, [reserveBelow]);
   // Notices and toolbar wrapping can move the screen without a window resize.
   useLayoutEffect(() => { fitToViewport(); });
   useEffect(() => {
@@ -75,11 +76,11 @@ function Screen({ capture, connected, mode, now, interval }: {
     return () => { window.removeEventListener('resize', fitToViewport); observer.disconnect(); };
   }, [fitToViewport]);
   const age = capture ? Math.max(0, now - new Date(capture.createdAt).getTime()) : 0;
-  const stale = Boolean(capture && (!connected || age > Math.max(15000, interval * 2)));
-  return <div className="screen-shell">
+  const stale = Boolean(capture && (invalidated || !connected || age > Math.max(15000, interval * 2)));
+  return <div className="screen-shell" data-preview-invalidated={invalidated} data-stale={stale}>
     <div className="screen-heading">
       <span className="screen-heading-label"><span className={`screen-led ${capture && !stale ? 'ready' : ''}`} />
-        {capture ? capture.saved ? 'SAVED CAPTURE' : stale ? 'STALE PREVIEW' : 'SCREEN PREVIEW' : 'SCREEN PREVIEW'}</span>
+        {capture ? invalidated ? 'PREVIOUS SCREEN' : capture.saved ? 'SAVED CAPTURE' : stale ? 'STALE PREVIEW' : 'SCREEN PREVIEW' : 'SCREEN PREVIEW'}</span>
       <div className="screen-heading-right"><SourceBadge source={capture?.source ?? mode} />
         <span>{capture ? clockTime(capture.createdAt) : '800 × 480'}</span></div>
     </div>
@@ -95,7 +96,7 @@ function Screen({ capture, connected, mode, now, interval }: {
       </>}
     </div>
     <div className="screen-footer">
-      <span><Clock3 size={13} />{capture ? `${capture.saved ? 'Saved' : 'Preview'} ${dateTime(capture.createdAt)}${stale ? ' · historical view' : ''}` : 'No capture yet'}</span>
+      <span><Clock3 size={13} />{capture ? `${capture.saved ? 'Saved' : 'Preview'} ${dateTime(capture.createdAt)}${invalidated ? ' · refresh required' : stale ? ' · historical view' : ''}` : 'No capture yet'}</span>
       <span>{capture?.source === 'demo' ? 'Simulated screen' : capture?.checksumVerified ? <><ShieldCheck size={13} />Checksums verified</> : 'Screen images · not waveform samples'}</span>
     </div>
   </div>;
@@ -113,6 +114,9 @@ export default function App() {
   const [sourceFilter, setSourceFilter] = useState<'all' | ScopeMode>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<Capture | null>(null);
+  // Connection and request replies cannot establish that an existing image is current.
+  const [previewInvalidated, setPreviewInvalidated] = useState(true);
+  const [lastControlRequest, setLastControlRequest] = useState<LastControlRequest | null>(null);
   const [label, setLabel] = useState('');
   const [notes, setNotes] = useState('');
   const [guid, setGuid] = useState('');
@@ -124,17 +128,18 @@ export default function App() {
 
   const ingest = useCallback((next: AppState) => {
     const previous = stateRef.current;
-    const settingsChanged = previous.settings.mode !== next.settings.mode ||
+    const contextChanged = previous.settings.mode !== next.settings.mode ||
       previous.settings.storageDir !== next.settings.storageDir ||
-      previous.settings.interfaceGuid !== next.settings.interfaceGuid ||
-      previous.settings.refreshIntervalMs !== next.settings.refreshIntervalMs;
+      previous.settings.interfaceGuid !== next.settings.interfaceGuid;
+    const settingsChanged = contextChanged || previous.settings.refreshIntervalMs !== next.settings.refreshIntervalMs;
     if (settingsChanged || !next.connected) {
       refreshGeneration.current += 1;
       if (mounted.current) setAutoRefresh(false);
     }
-    if (mounted.current && (previous.settings.mode !== next.settings.mode ||
-      previous.settings.storageDir !== next.settings.storageDir ||
-      previous.settings.interfaceGuid !== next.settings.interfaceGuid)) setPreview(null);
+    if (mounted.current) {
+      if (contextChanged || !next.connected) setPreviewInvalidated(true);
+      if (contextChanged) { setPreview(null); setLastControlRequest(null); }
+    }
     stateRef.current = next;
     if (mounted.current) setState(next);
   }, []);
@@ -188,8 +193,11 @@ export default function App() {
 
   const takeCapture = useCallback(async (save = true) => {
     const result = await withOperation(save ? 'Saving screen capture' : 'Refreshing preview',
-      () => save ? window.scopeApp.capture() : window.scopeApp.capture({ save: false }));
-    if (result && mounted.current) setPreview(result);
+      () => {
+        setPreviewInvalidated(true);
+        return save ? window.scopeApp.capture() : window.scopeApp.capture({ save: false });
+      });
+    if (result && mounted.current) { setPreview(result); setPreviewInvalidated(false); }
     return result;
   }, [withOperation]);
 
@@ -230,7 +238,10 @@ export default function App() {
   const navigate = (next: View) => { stopRefresh(); setView(next); setNotice(null); };
   const connect = async () => {
     stopRefresh();
-    const result = await withOperation('Connecting', () => window.scopeApp.connect());
+    const result = await withOperation('Connecting', () => {
+      setPreviewInvalidated(true);
+      return window.scopeApp.connect();
+    });
     if (result) {
       showNotice('success', result.settings.mode === 'demo' ? 'Demo connected. Captures are simulated.' : 'Scope connected. Ready to capture its screen.');
       if (result.connected) await takeCapture(false);
@@ -238,16 +249,51 @@ export default function App() {
   };
   const disconnect = async () => {
     stopRefresh();
-    const result = await withOperation('Disconnecting', () => window.scopeApp.disconnect());
+    const result = await withOperation('Disconnecting', () => {
+      setPreviewInvalidated(true);
+      return window.scopeApp.disconnect();
+    });
     if (result) showNotice('info', 'Disconnected. Saved captures remain in your library.');
   };
   const acquisition = async (action: 'start' | 'stop') => {
     stopRefresh();
-    const result = await withOperation(action === 'start' ? 'Sending Run request' : 'Sending Stop request', () => window.scopeApp.setAcquisition(action));
+    const result = await withOperation(action === 'start' ? 'Sending Run request' : 'Sending Stop request', () => {
+      setPreviewInvalidated(true);
+      return window.scopeApp.setAcquisition(action);
+    });
     if (result) {
-      if (result.capture && mounted.current) setPreview(result.capture);
-      showNotice('info', result.message);
+      if (result.capture && mounted.current) { setPreview(result.capture); setPreviewInvalidated(false); }
+      showNotice(result.capture ? 'info' : 'error', result.message);
     }
+  };
+  const panelAction = async (control: FrontPanelControl, count: number) => {
+    stopRefresh();
+    if (!captureReady || operationLock.current) return;
+    const api = window.scopeApp;
+    if (typeof api.panelAction !== 'function') {
+      showNotice('error', 'This desktop version does not provide front-panel controls.');
+      return;
+    }
+    const request: LastControlRequest = {
+      label: `${control.group} · ${control.label}`, count, rotary: control.kind === 'rotary', at: new Date().toISOString(),
+      source: state.settings.mode, status: 'sending', message: 'Request in progress. Waiting for the instrument response.',
+    };
+    setLastControlRequest(request);
+    setPreviewInvalidated(true);
+    const result = await withOperation(`Requesting ${control.label}`, () => api.panelAction({ control: control.id, count }));
+    if (!mounted.current) return;
+    if (result) {
+      if (result.capture) { setPreview(result.capture); setPreviewInvalidated(false); }
+      setLastControlRequest({ ...request, status: result.capture ? 'replied' : 'unconfirmed', message: result.message });
+      showNotice(result.capture ? 'info' : 'error', result.message);
+    } else {
+      setLastControlRequest({ ...request, status: 'unconfirmed', message: 'This request could not be confirmed. Inspect the activity log and the instrument screen before retrying.' });
+    }
+  };
+  const readSettingsRecord = async () => {
+    stopRefresh();
+    const result = await withOperation('Reading settings record', () => window.scopeApp.readSettings());
+    if (result) showNotice('info', result.message);
   };
   const saveSettings = async (patch: Partial<Pick<Settings, 'mode' | 'refreshIntervalMs' | 'interfaceGuid'>>) => {
     stopRefresh();
@@ -286,6 +332,7 @@ export default function App() {
       <div className="nav-heading">YOUR INSTRUMENT</div>
       <nav aria-label="Main navigation">
         <button className={`nav-item ${view === 'workspace' ? 'active' : ''}`} onClick={() => navigate('workspace')} aria-current={view === 'workspace' ? 'page' : undefined}><LayoutDashboard size={18} />Workspace<span className="nav-current-dot" /></button>
+        <button className={`nav-item ${view === 'controls' ? 'active' : ''}`} onClick={() => navigate('controls')} aria-current={view === 'controls' ? 'page' : undefined}><SlidersHorizontal size={18} />Controls<span className="nav-current-dot" /></button>
         <button className={`nav-item ${view === 'captures' ? 'active' : ''}`} onClick={() => navigate('captures')} aria-current={view === 'captures' ? 'page' : undefined}><Images size={18} />Captures<span className="nav-count">{state.captures.length}</span></button>
         <button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')} aria-current={view === 'settings' ? 'page' : undefined}><Settings2 size={18} />Settings</button>
       </nav>
@@ -303,7 +350,7 @@ export default function App() {
     </aside>
 
     <div className="main-shell">
-      <header className="topbar"><div className="breadcrumb">Your bench<span>/</span><strong>{view === 'workspace' ? 'Workspace' : view === 'captures' ? 'Captures' : 'Settings'}</strong></div>
+      <header className="topbar"><div className="breadcrumb">Your bench<span>/</span><strong>{view === 'workspace' ? 'Workspace' : view === 'controls' ? 'Controls' : view === 'captures' ? 'Captures' : 'Settings'}</strong></div>
         <div className="topbar-right">{busy && <span className="operation-indicator" role="status"><LoaderCircle size={13} className="spin" />{operation ?? 'Working'}</span>}<span className="local-only"><ShieldCheck size={13} />Stored locally</span><SourceBadge source={state.settings.mode} /></div>
       </header>
       <main className={`main-content view-${view}`}>
@@ -318,7 +365,7 @@ export default function App() {
               <div className="instrument-toolbar"><div className="toolbar-actions"><button className="button primary" disabled={!captureReady} onClick={() => { void takeCapture(); }}><Camera size={16} />Save capture</button><div className="acquisition-buttons"><button className="button quiet" disabled={!captureReady} onClick={() => { void acquisition('start'); }} title="Request that the oscilloscope resume acquisition"><Play size={14} />Run</button><button className="button quiet" disabled={!captureReady} onClick={() => { void acquisition('stop'); }} title="Request that the oscilloscope stop acquisition"><Square size={13} />Stop</button></div></div>
                 <label className="auto-refresh-control"><input type="checkbox" role="switch" checked={autoRefresh} disabled={!state.connected || !loaded || (busy && !autoRefresh)} onChange={(event) => { if (event.target.checked) setAutoRefresh(true); else stopRefresh(); }} /><span className="switch-track"><span /></span><span>Auto-refresh<small>Every {Math.max(3000, state.settings.refreshIntervalMs) / 1000}s</small></span></label>
               </div>
-              <Screen capture={latest} connected={state.connected} mode={state.settings.mode} now={now} interval={state.settings.refreshIntervalMs} />
+              <Screen capture={latest} connected={state.connected} mode={state.settings.mode} now={now} interval={state.settings.refreshIntervalMs} invalidated={previewInvalidated} />
               <div className="instrument-footnote"><Info size={14} /><span>Run and Stop request a change to scope acquisition. Verify the resulting indicator on the captured screen.</span>{latest && (latest.saved ? <button className="text-button" onClick={() => openLibrary(latest.id)}>View capture<ArrowRight size={13} /></button> : <div className="preview-actions"><button className="text-button" disabled={!ready} onClick={() => { void exportCapture(latest); }}>Export preview<ArrowDownToLine size={13} /></button><button className="icon-button" disabled={!ready} aria-label="Show preview in folder" onClick={() => { void revealCapture(latest); }}><FolderOpen size={13} /></button></div>)}</div>
             </section>
             <aside className="workspace-aside">
@@ -337,6 +384,19 @@ export default function App() {
           </section>
         </>}
 
+        {view === 'controls' && <ControlsView
+          catalog={state.controlCatalog ?? []}
+          connected={loaded && state.connected} busy={busy} mode={state.settings.mode}
+          model={state.device?.model ?? 'Hantek DSO5102P'}
+          screen={<Screen capture={latest} connected={state.connected} mode={state.settings.mode} now={now} interval={state.settings.refreshIntervalMs} invalidated={previewInvalidated} reserveBelow={22} />}
+          lastRequest={lastControlRequest}
+          onAction={(control, count) => { void panelAction(control, count); }}
+          onRefresh={() => { stopRefresh(); void takeCapture(false); }}
+          onSave={() => { stopRefresh(); void takeCapture(); }}
+          onAcquisition={(action) => { void acquisition(action); }}
+          onReadSettings={() => { void readSettingsRecord(); }}
+        />}
+
         {view === 'captures' && <>
           <div className="page-heading"><div><p className="eyebrow">YOUR VISUAL NOTEBOOK</p><h1>Capture library<span className="heading-count">{state.captures.length}</span></h1><p>Saved screens, with the context that makes them useful.</p></div><button className="button secondary" disabled={!ready} onClick={() => { void withOperation('Refreshing library', () => window.scopeApp.listCaptures()); }}><RefreshCw size={15} />Refresh library</button></div>
           <div className="library-tools"><label className="search-box"><Search size={17} /><input aria-label="Search captures" placeholder="Search captures or notes…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button className="icon-button" aria-label="Clear capture search" onClick={() => setSearch('')}><X size={14} /></button>}</label><div className="filter-tabs" role="group" aria-label="Filter capture source">{(['all', 'hardware', 'demo'] as const).map((source) => <button key={source} aria-pressed={sourceFilter === source} className={sourceFilter === source ? 'selected' : ''} onClick={() => setSourceFilter(source)}>{source === 'all' ? 'All captures' : source === 'demo' ? 'Demo' : 'Hardware'}</button>)}</div><span className="sort-label">Newest first<ChevronDown size={13} /></span></div>
@@ -353,7 +413,7 @@ export default function App() {
           <div className="settings-layout"><div className="settings-sections">
             <section className="card settings-card"><div className="settings-section-heading"><span><Usb size={20} /></span><div><h2>Instrument connection</h2><p>Choose how you want to use this workspace.</p></div></div><div className="mode-options" role="group" aria-label="Instrument mode"><button className={`mode-option ${!demo ? 'selected' : ''}`} disabled={!ready} onClick={() => { if (demo) void saveSettings({ mode: 'hardware' }); }} aria-pressed={!demo}><span className="mode-option-top"><Usb size={20} /><span className="radio-indicator">{!demo && <span />}</span></span><strong>USB instrument</strong><span>Connect your Hantek DSO5102P.</span></button><button className={`mode-option ${demo ? 'selected' : ''}`} disabled={!ready} onClick={() => { if (!demo) void saveSettings({ mode: 'demo' }); }} aria-pressed={demo}><span className="mode-option-top"><Monitor size={20} /><span className="radio-indicator">{demo && <span />}</span></span><strong>Demo workspace<SourceBadge source="demo" /></strong><span>Explore with simulated screen images.</span></button></div><div className="settings-inline-note"><Info size={15} /><p>{demo ? 'Demo mode does not access a USB instrument. All generated captures are marked as demo.' : 'Use the rear USB-B connection on your powered scope. The configured WinUSB driver is used locally.'}</p></div><div className="connection-test-row"><span><span className={`status-dot ${state.connected ? 'connected' : ''}`} />{state.connected ? demo ? 'Demo connected' : 'Instrument connected' : 'Not connected'}</span><button className="button secondary" disabled={!captureReady} onClick={() => { void checkConnection(); }}><Plug size={15} />Test connection</button></div></section>
             <section className="card settings-card"><div className="settings-section-heading"><span><Folder size={20} /></span><div><h2>Capture storage</h2><p>Keep screen images and their supporting records together.</p></div></div><div className="folder-field"><FolderOpen size={19} /><p>{state.settings.storageDir || 'Storage location unavailable'}</p><button className="button secondary" disabled={!ready} onClick={() => { void chooseStorage(); }}>Choose folder</button></div><p className="field-help">New captures use this location. Export an individual PNG from the capture library when you want a copy elsewhere.</p></section>
-            <section className="card settings-card"><div className="settings-section-heading"><span><RefreshCw size={20} /></span><div><h2>Screen refresh</h2><p>Set the pause between completed captures.</p></div></div><div className="refresh-setting-row"><div><label htmlFor="refresh-interval">Auto-refresh interval</label><p>Enable auto-refresh from the workspace when connected.</p></div><select id="refresh-interval" value={Math.max(3000, state.settings.refreshIntervalMs)} disabled={!ready} onChange={(event) => { void saveSettings({ refreshIntervalMs: Number(event.target.value) }); }}>{[3000, 5000, 10000, 15000, 30000, ...( ![3000, 5000, 10000, 15000, 30000, 60000].includes(Math.max(3000, state.settings.refreshIntervalMs)) ? [Math.max(3000, state.settings.refreshIntervalMs)] : [])].sort((a, b) => a - b).map((ms) => <option key={ms} value={ms}>Every {ms / 1000} seconds</option>)}</select></div><p className="field-help">Captures run one at a time. Auto-refresh stops when you leave the workspace, change settings, disconnect, or encounter an error.</p></section>
+            <section className="card settings-card"><div className="settings-section-heading"><span><RefreshCw size={20} /></span><div><h2>Screen refresh</h2><p>Set the pause between completed captures.</p></div></div><div className="refresh-setting-row"><div><label htmlFor="refresh-interval">Auto-refresh interval</label><p>Enable auto-refresh from the workspace when connected.</p></div><select id="refresh-interval" value={Math.max(3000, state.settings.refreshIntervalMs)} disabled={!ready} onChange={(event) => { void saveSettings({ refreshIntervalMs: Number(event.target.value) }); }}>{[3000, 5000, 10000, 15000, 30000, 60000, ...( ![3000, 5000, 10000, 15000, 30000, 60000].includes(Math.max(3000, state.settings.refreshIntervalMs)) ? [Math.max(3000, state.settings.refreshIntervalMs)] : [])].sort((a, b) => a - b).map((ms) => <option key={ms} value={ms}>Every {ms / 1000} seconds</option>)}</select></div><p className="field-help">Captures run one at a time. Auto-refresh stops when you leave the workspace, change settings, disconnect, or encounter an error.</p></section>
             <section className="card settings-card advanced-card"><button className="advanced-heading" aria-expanded={advanced} aria-controls="advanced-connection" onClick={() => setAdvanced(!advanced)}><span><Settings2 size={18} /><strong>Advanced connection</strong></span><ChevronDown size={17} className={advanced ? 'rotated' : ''} /></button>{advanced && <div id="advanced-connection" className="advanced-content"><p className="field-help">The interface identifier must match the existing WinUSB setup for your scope.</p><label className="field-label" htmlFor="interface-guid">Device interface GUID</label><div className="guid-field"><input id="interface-guid" value={guid} onChange={(event) => setGuid(event.target.value)} spellCheck={false} autoComplete="off" /><button className="button secondary" disabled={!ready || !guid.trim() || guid === state.settings.interfaceGuid} onClick={() => { void saveSettings({ interfaceGuid: guid.trim() }); }}>Save identifier</button></div></div>}</section>
           </div><aside className="settings-aside"><div className="settings-note"><ShieldCheck size={26} strokeWidth={1.5} /><h3>At home on your bench.</h3><p>Hantek Studio connects through local USB. Your captures stay in the folder you choose.</p><div /><p>Screen images preserve the displayed instrument view. They do not contain raw waveform samples.</p><span>HANTEK STUDIO{state.appVersion && ` · ${state.appVersion}`}</span></div></aside></div>
         </>}

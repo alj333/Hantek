@@ -31,7 +31,7 @@ Push-Location $scopeRepo
 try {
     & $scopeBuildPython -m unittest discover -s tests -v
     if ($LASTEXITCODE -ne 0) { throw 'Python checks failed.' }
-    & $scopeBuildPython -m PyInstaller --noconfirm --clean --onedir --console --noupx --name scope-bridge --distpath $scopeBuild --workpath (Join-Path $scopeBuild 'pyinstaller-work') --specpath $scopeBuild (Join-Path $scopeRepo 'src/desktop_bridge.py')
+    & $scopeBuildPython -m PyInstaller --noconfirm --clean --onedir --console --noupx --name scope-bridge --add-data "$(Join-Path $scopeRepo 'src/control_catalog.json');." --distpath $scopeBuild --workpath (Join-Path $scopeBuild 'pyinstaller-work') --specpath $scopeBuild (Join-Path $scopeRepo 'src/desktop_bridge.py')
     if ($LASTEXITCODE -ne 0) { throw 'Scope runtime packaging failed.' }
     $scopeFrozen = Join-Path $scopeBuild 'scope-bridge/scope-bridge.exe'
     $scopeSelfTestText = & $scopeFrozen --self-test

@@ -12,7 +12,9 @@ Give another project's agent this instruction, adapting the output path:
 > and operating/setup notes. The existing USB connection uses WinUSB; do not
 > reinstall drivers. Start with identification and a screen capture, saving
 > artifacts in this project's `artifacts\scope` directory. Change acquisition
-> state only when this task calls for it. Report actual evidence and limitations.
+> state or ordinary scope settings only when this task calls for it. Read the
+> control guide before using named panel gestures; inspect a fresh screenshot
+> after each action. Report actual evidence and limitations.
 
 Before probing a device, establish the signal type, voltage, reference/ground,
 probe attenuation and bandwidth requirements with the operator. This repository
@@ -85,9 +87,11 @@ directory. Use absolute paths for unambiguous cross-project work.
 
 ## Current limitations
 
-Only the five established live device commands are supported. The
-[desktop app](DESKTOP_APP.md) adds periodic screen previews and a capture
-library around them. There is no generic panel control, raw waveform acquisition, firmware management,
-scope filesystem access, shell access or remote network endpoint. Add future
-capabilities as individually bounded operations, with offline protocol tests
-and a specific live validation procedure.
+The five original device actions remain supported. Version 0.2 adds named,
+bounded panel gestures and raw settings records, described in
+[Instrument controls](CONTROLS.md). The [desktop app](DESKTOP_APP.md) provides a
+Controls view, screen previews and a capture library around the same client.
+There is no arbitrary command/key passthrough, calibrated numeric readback,
+raw waveform acquisition, firmware management, scope filesystem access, shell
+access or remote network endpoint. Keep new capabilities individually bounded
+and distinguish offline checks from actual bench validation.

@@ -3,6 +3,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { demoImage } = require('./demo-image.cjs');
+const { publicControls, validatePanelAction } = require('./control-catalog.cjs');
 
 const DEFAULT_GUID = '5cb35641-beea-4a98-b06b-3cf4dca1911b';
 const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -46,15 +47,16 @@ async function atomicJson(file, value) {
 }
 
 class StudioService extends EventEmitter {
-  constructor({ storageDir, settingsPath, previewDir, bridge, version = '0.1.0' }) {
+  constructor({ storageDir, settingsPath, previewDir, bridge, version = '0.2.0' }) {
     super();
     this.settingsPath = settingsPath;
     this.previewDir = safeDirectory(previewDir);
     this.bridge = bridge;
-    this.state = { appVersion: version, settings: { mode: 'hardware', storageDir: safeDirectory(storageDir), refreshIntervalMs: 5000, interfaceGuid: DEFAULT_GUID }, connected: false, busy: false, device: null, captures: [], activity: [] };
+    this.state = { appVersion: version, settings: { mode: 'hardware', storageDir: safeDirectory(storageDir), refreshIntervalMs: 5000, interfaceGuid: DEFAULT_GUID }, connected: false, busy: false, device: null, captures: [], activity: [], controlCatalog: structuredClone(publicControls) };
     this.registry = new Map();
     this.demoPhase = 0;
     this.demoRunning = true;
+    this.demoControls = { lastAction: '', ch1Scale: 1, ch2Scale: 1, ch1Offset: 0, ch2Offset: 0, timeScale: 1, timeOffset: 0, triggerOffset: 0 };
   }
   async initialize() {
     try {
@@ -150,7 +152,7 @@ class StudioService extends EventEmitter {
       if (this.demoRunning) this.demoPhase += 0.18;
       const stem = `demo-${Date.now()}-${randomUUID()}`;
       file = path.join(directory, `${stem}.json`);
-      await fs.writeFile(path.join(directory, `${stem}.png`), demoImage(this.demoPhase), { flag: 'wx' });
+      await fs.writeFile(path.join(directory, `${stem}.png`), demoImage(this.demoPhase, this.demoControls), { flag: 'wx' });
       metadata = { status: 'complete', width: 800, height: 480, source: 'demo', started_utc: new Date().toISOString(), png_path: path.join(directory, `${stem}.png`), generated: true };
       await atomicJson(file, metadata);
     } else {
@@ -183,6 +185,55 @@ class StudioService extends EventEmitter {
         const failure = `${message} Screen refresh failed: ${friendlyError(error)} Acquisition result is unverified; do not automatically retry.`;
         this.record('error', failure); return { message: failure, capture: null };
       }
+    });
+  }
+  async panelAction(input) {
+    const { control, count } = validatePanelAction(input);
+    return this.exclusive(async () => {
+      this.requireConnection();
+      const demo = this.state.settings.mode === 'demo';
+      if (demo) {
+        this.applyDemoControl(control.id, count);
+        const directory = path.join(this.state.settings.storageDir, 'demo', 'logs');
+        await atomicJson(path.join(directory, `panel-${Date.now()}-${randomUUID()}.json`), { source: 'demo', hardware_access: false, control: control.id, count, requested_at_utc: new Date().toISOString(), instrument_state_verified: false });
+      } else {
+        await this.call('panel-control', { control: control.id, count, log_dir: path.join(this.state.settings.storageDir, 'logs') });
+      }
+      const message = demo ? `Demo: ${control.label}${count > 1 ? ` (${count} steps)` : ''}. Simulated response.` : `${control.label}${count > 1 ? ` (${count} steps)` : ''} requested. Check the new scope screen to confirm the result.`;
+      this.record('info', message);
+      try { return { message, capture: await this.captureInternal(false) }; }
+      catch (error) {
+        this.state.connected = false; this.state.device = null;
+        const failure = `${message} Screen refresh failed: ${friendlyError(error)} The control result is unverified; do not repeat it automatically.`;
+        this.record('error', failure); return { message: failure, capture: null };
+      }
+    });
+  }
+  applyDemoControl(id, count) {
+    // Visual rehearsal only: these values are never instrument settings/readback.
+    this.demoControls.lastAction = id.toUpperCase().replaceAll('-', ' ');
+    const signed = id.endsWith('-minus') ? -count : count;
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+    for (const channel of ['ch1', 'ch2']) {
+      if (id.startsWith(`${channel}-scale-`)) this.demoControls[`${channel}Scale`] = clamp(this.demoControls[`${channel}Scale`] * (1.35 ** -signed), 0.1, 2);
+      if (id.startsWith(`${channel}-position-`)) this.demoControls[`${channel}Offset`] = id.endsWith('-zero') ? 0 : clamp(this.demoControls[`${channel}Offset`] - signed * 8, -130, 130);
+    }
+    if (id.startsWith('timebase-')) this.demoControls.timeScale = clamp(this.demoControls.timeScale * (1.25 ** signed), 0.2, 5);
+    if (id.startsWith('horizontal-position-')) this.demoControls.timeOffset = id.endsWith('-zero') ? 0 : clamp(this.demoControls.timeOffset + signed * 10, -250, 250);
+    if (id.startsWith('trigger-level-')) this.demoControls.triggerOffset = id.endsWith('-zero') ? 0 : clamp(this.demoControls.triggerOffset - signed * 6, -150, 150);
+    if (id === 'trigger-half') this.demoControls.triggerOffset = 0;
+    if (id === 'autoset') Object.assign(this.demoControls, { ch1Scale: 1, ch2Scale: 1, ch1Offset: 0, ch2Offset: 0, timeScale: 1, timeOffset: 0, triggerOffset: 0 });
+    if (id === 'single-sequence') this.demoRunning = false;
+    this.demoPhase += 0.13;
+  }
+  async readSettings() {
+    return this.exclusive(async () => {
+      this.requireConnection();
+      const demo = this.state.settings.mode === 'demo';
+      const record = demo ? { source: 'demo', hardware_access: false, instrument_state_verified: false, simulated: structuredClone(this.demoControls), requested_at_utc: new Date().toISOString() } : await this.call('read-settings', { log_dir: path.join(this.state.settings.storageDir, 'logs') });
+      if (demo) await atomicJson(path.join(this.state.settings.storageDir, 'demo', 'logs', `settings-${Date.now()}-${randomUUID()}.json`), record);
+      const message = demo ? 'Simulated settings record saved. No USB access.' : 'Raw settings reply saved to operation logs. Numeric interpretation still needs validation on this firmware.';
+      this.record('info', message); return { message, record };
     });
   }
   async readCapture(file, source, saved) {

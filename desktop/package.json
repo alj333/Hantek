@@ -1,8 +1,8 @@
 {
   "name": "hantek-studio",
   "productName": "Hantek Studio",
-  "version": "0.1.0",
-  "description": "Local Hantek DSO5102P desktop capture and acquisition workspace",
+  "version": "0.2.0",
+  "description": "Local Hantek DSO5102P front-panel control and capture workspace",
   "private": true,
   "author": "Hantek Studio contributors",
   "main": "electron/main.cjs",
@@ -12,6 +12,8 @@
     "start": "electron .",
     "test": "node --test tests/*.test.cjs",
     "test:ui": "node tests/desktop-smoke.cjs",
+    "test:controls": "node tests/controls-ui.cjs",
+    "test:preview-failures": "node tests/preview-failures-ui.cjs",
     "package:win": "electron-builder --win portable --x64 --publish never"
   },
   "dependencies": {
@@ -32,11 +34,45 @@
   "build": {
     "appId": "local.hantek.studio",
     "productName": "Hantek Studio",
-    "directories": { "output": "release", "buildResources": "assets" },
-    "files": ["dist/**/*", "electron/**/*", "assets/icon.png", "package.json"],
-    "extraResources": [{ "from": "../.local/build/scope-bridge", "to": "scope-bridge", "filter": ["**/*"] }],
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "assets/icon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../.local/build/scope-bridge",
+        "to": "scope-bridge",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../src/control_catalog.json",
+        "to": "control_catalog.json"
+      }
+    ],
     "asar": true,
-    "win": { "target": [{ "target": "portable", "arch": ["x64"] }], "signExecutable": false, "icon": "assets/icon.ico" },
-    "portable": { "artifactName": "Hantek-Studio-${version}-Windows.exe", "requestExecutionLevel": "user" }
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signExecutable": false,
+      "icon": "assets/icon.ico"
+    },
+    "portable": {
+      "artifactName": "Hantek-Studio-${version}-Windows.exe",
+      "requestExecutionLevel": "user"
+    }
   }
 }

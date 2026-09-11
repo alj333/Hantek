@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('scopeApp', {
   checkConnection: () => invoke('checkConnection'),
   capture: options => invoke('capture', options),
   setAcquisition: state => invoke('setAcquisition', state),
+  panelAction: input => invoke('panelAction', input),
+  readSettings: () => invoke('readSettings'),
   updateSettings: patch => invoke('updateSettings', patch),
   chooseStorageDirectory: () => invoke('chooseStorageDirectory'),
   listCaptures: () => invoke('listCaptures'),

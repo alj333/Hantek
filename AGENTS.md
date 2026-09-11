@@ -23,6 +23,12 @@ firmware behaves identically. Do not claim compatibility without evidence.
   USB device exclusively.
 - Normal commands run without elevation. Only the one-time driver-binding
   operation needs Windows administrator approval.
+- Normal front-panel gestures are exposed by name through `panel-control` and
+  the desktop Controls view. Read `docs/CONTROLS.md` and its validation checklist.
+  Send one gesture, inspect a fresh screen, and only then decide the next action.
+  Never infer absolute numeric settings from a gesture count or a short reply.
+- `controls` lists capabilities offline. `read-settings` records a bounded raw
+  settings reply without claiming a firmware-independent numeric interpretation.
 - Do not manipulate a Windows administrator/security approval dialog. Let the
   user approve it. If it is cancelled, stop that action and explain the result.
 
@@ -35,6 +41,10 @@ firmware behaves identically. Do not claim compatibility without evidence.
   force a driver onto an unidentified device or relax the single-device check.
 - Preserve the explicit command/payload allowlists, transfer deadlines, size and
   count limits, checksums, identity checks and exclusive device access.
+- Expand normal controls only through the shared `src/control_catalog.json`
+  with source evidence and tests. Soft keys and the multifunction knob depend
+  on the current menu: inspect the display and use only ordinary scope menus.
+  Do not drive maintenance or save menus through contextual gestures.
 - Do not add generic raw-command passthrough, scope shell access, instrument file
   writes, firmware updates, factory resets or automatic calibration.
 - No signal generator, DUT control, CNC transfer/write/execution capability or

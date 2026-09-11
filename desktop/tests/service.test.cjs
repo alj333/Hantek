@@ -90,6 +90,10 @@ async function makeFixture(t, customBridge) {
     if (['acquisition-start', 'acquisition-stop'].includes(request.action)) {
       return { status: 'replies_received_usb_idle_execution_unverified', command: request.action };
     }
+    if (request.action === 'panel-control') {
+      return { status: 'sent_execution_unverified', control: request.control, count: request.count, instrument_state_verified: false };
+    }
+    if (request.action === 'read-settings') return { status: 'complete', raw_reply_hex: '00000000', interpretation_verified: false };
     throw new Error(`Unexpected bridge request: ${request.action}`);
   };
   const options = {
@@ -356,4 +360,183 @@ test('returned application state cannot be mutated to authorize hardware access'
   assert.ok(service.getState().activity.every((entry) => entry.message !== 'injected'));
   await assert.rejects(() => service.capture());
   assert.equal(calls.length, 0);
+});
+
+function representativeControls(service) {
+  const catalog = service.getState().controlCatalog;
+  assert.ok(Array.isArray(catalog) && catalog.length > 0);
+  const button = catalog.find(control => control.kind === 'button');
+  const rotary = catalog.find(control => control.kind === 'rotary');
+  assert.ok(button, 'A front-panel button must be available');
+  assert.ok(rotary, 'A front-panel rotary control must be available');
+  return { catalog, button, rotary };
+}
+
+test('panel controls expose provenance but no generic command or payload entry point', async (t) => {
+  const { service } = await makeFixture(t);
+  const { catalog } = representativeControls(service);
+  assert.equal(new Set(catalog.map(control => control.id)).size, catalog.length);
+  for (const control of catalog) {
+    assert.ok(['bench-pending', 'screen-verified'].includes(control.validation));
+    assert.ok(typeof control.label === 'string' && control.label.length > 0);
+    assert.equal(control.maxCount, control.kind === 'rotary' ? 5 : 1);
+    for (const field of ['payload', 'payload_hex', 'command', 'command_hex', 'key_code', 'keycode']) assert.equal(field in control, false);
+  }
+  const original = service.getState().controlCatalog;
+  catalog[0].validation = 'invented';
+  assert.deepEqual(service.getState().controlCatalog, original);
+});
+
+test('invalid panel requests are rejected before the bridge sees any command', async (t) => {
+  const { service, calls } = await makeFixture(t);
+  const { button, rotary } = representativeControls(service);
+  await hardwareConnect(service);
+  const countBefore = calls.length;
+  for (const request of [
+    null, [], 'start', {}, { control: 'factory-reset' }, { control: '../arbitrary' },
+    { control: button.id, count: 2 }, { control: rotary.id, count: 0 },
+    { control: rotary.id, count: 6 }, { control: rotary.id, count: 1.5 },
+    { control: rotary.id, count: '1' }, { control: rotary.id, count: NaN },
+    { control: rotary.id, count: Infinity }, { control: rotary.id, count: null },
+    { control: button.id, payload: '00' }, { control: button.id, log_dir: '../elsewhere' },
+  ]) await assert.rejects(() => service.panelAction(request));
+  assert.equal(calls.length, countBefore);
+});
+
+test('panel actions and settings reads require an explicit connection', async (t) => {
+  const { service, calls } = await makeFixture(t);
+  const { button } = representativeControls(service);
+  await assert.rejects(() => service.panelAction({ control: button.id }));
+  await assert.rejects(() => service.readSettings());
+  assert.equal(calls.length, 0);
+});
+
+test('named button and bounded rotary requests use one command each and leave execution unverified', async (t) => {
+  const { service, calls } = await makeFixture(t);
+  const { catalog, button, rotary } = representativeControls(service);
+  await hardwareConnect(service);
+  for (const input of [{ control: button.id }, { control: rotary.id, count: 5 }]) {
+    const result = await service.panelAction(input);
+    assert.ok(result.capture);
+    assert.equal(result.capture.source, 'hardware');
+    assert.equal(result.capture.saved, false);
+    assert.match(result.message, /requested/i);
+    assert.match(result.message, /check.*screen|screen.*confirm/i);
+  }
+  const actions = calls.filter(request => request.action === 'panel-control');
+  assert.equal(actions.length, 2);
+  assert.deepEqual(actions.map(({ control, count }) => ({ control, count })), [
+    { control: button.id, count: 1 }, { control: rotary.id, count: 5 },
+  ]);
+  for (const request of actions) {
+    assert.ok(path.isAbsolute(request.log_dir));
+    assert.deepEqual(Object.keys(request).sort(), ['action', 'control', 'count', 'guid', 'log_dir']);
+  }
+  assert.equal(calls.filter(request => request.action === 'screenshot').length, 2);
+  assert.deepEqual(service.getState().controlCatalog, catalog);
+  assert.equal((await service.listCaptures()).length, 0);
+});
+
+test('demo panel actions and settings are simulated, logged, and never touch the bridge', async (t) => {
+  const { service, calls, options } = await makeFixture(t, async () => { throw new Error('Demo accessed hardware'); });
+  const { catalog, button, rotary } = representativeControls(service);
+  await service.updateSettings({ mode: 'demo' });
+  await service.connect();
+  for (const input of [{ control: button.id }, { control: rotary.id, count: 5 }]) {
+    const result = await service.panelAction(input);
+    assert.match(result.message, /demo.*simulated/i);
+    assert.equal(result.capture.source, 'demo');
+    assert.equal(result.capture.checksumVerified, false);
+    assert.equal(result.capture.saved, false);
+  }
+  const settings = await service.readSettings();
+  assert.equal(settings.record.source, 'demo');
+  assert.equal(settings.record.hardware_access, false);
+  assert.equal(settings.record.instrument_state_verified, false);
+  const logDir = path.join(options.storageDir, 'demo', 'logs');
+  const files = (await fs.readdir(logDir)).filter(name => /^panel-.*\.json$/.test(name));
+  assert.equal(files.length, 2);
+  for (const name of files) {
+    const record = JSON.parse(await fs.readFile(path.join(logDir, name), 'utf8'));
+    assert.equal(record.source, 'demo');
+    assert.equal(record.hardware_access, false);
+    assert.equal(record.instrument_state_verified, false);
+  }
+  const settingsFiles = (await fs.readdir(logDir)).filter(name => /^settings-.*\.json$/.test(name));
+  assert.equal(settingsFiles.length, 1, 'The Save settings record action must persist its demo record');
+  const savedSettings = JSON.parse(await fs.readFile(path.join(logDir, settingsFiles[0]), 'utf8'));
+  assert.equal(savedSettings.source, 'demo');
+  assert.equal(savedSettings.hardware_access, false);
+  assert.equal(savedSettings.instrument_state_verified, false);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(service.getState().controlCatalog, catalog);
+});
+
+test('a failed panel send disconnects and is never repeated or followed by a misleading preview', async (t) => {
+  const { service, calls } = await makeFixture(t, async request => {
+    if (request.action === 'identify') return DEVICE;
+    throw new Error('Panel send attempted; result unknown');
+  });
+  const { button } = representativeControls(service);
+  await hardwareConnect(service);
+  await assert.rejects(() => service.panelAction({ control: button.id }), /result unknown/i);
+  assert.equal(calls.filter(request => request.action === 'panel-control').length, 1);
+  assert.equal(calls.filter(request => request.action === 'screenshot').length, 0);
+  assert.equal(service.getState().connected, false);
+  assert.equal(service.getState().busy, false);
+});
+
+test('a sent panel action with a failed preview remains distinct from a verified result', async (t) => {
+  const { service, calls } = await makeFixture(t, async request => {
+    if (request.action === 'identify') return DEVICE;
+    if (request.action === 'panel-control') return { status: 'sent_execution_unverified', instrument_state_verified: false };
+    throw new Error('Screenshot transfer interrupted');
+  });
+  const { button } = representativeControls(service);
+  await hardwareConnect(service);
+  const result = await service.panelAction({ control: button.id });
+  assert.equal(result.capture, null);
+  assert.match(result.message, /requested.*screen.*failed/i);
+  assert.match(result.message, /unverified/i);
+  assert.equal(calls.filter(request => request.action === 'panel-control').length, 1);
+  assert.equal(calls.filter(request => request.action === 'screenshot').length, 1);
+  assert.equal(service.getState().connected, false);
+  assert.equal(service.getState().busy, false);
+});
+
+test('an in-flight panel command rejects all competing hardware mutations and reads', async (t) => {
+  let release, enter;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const waiting = new Promise(resolve => { release = resolve; });
+  const { service, calls } = await makeFixture(t, async request => {
+    if (request.action === 'identify') return DEVICE;
+    if (request.action === 'panel-control') { enter(); await waiting; return { status: 'sent_execution_unverified' }; }
+    if (request.action === 'screenshot') return (await writeCapture(request.output_dir)).metadata;
+    throw new Error('Unexpected competing command');
+  });
+  const { button } = representativeControls(service);
+  await hardwareConnect(service);
+  const pending = service.panelAction({ control: button.id });
+  await entered;
+  await assert.rejects(() => service.panelAction({ control: button.id }));
+  await assert.rejects(() => service.setAcquisition('stop'));
+  await assert.rejects(() => service.capture());
+  await assert.rejects(() => service.readSettings());
+  await assert.rejects(() => service.disconnect());
+  assert.equal(calls.filter(request => request.action === 'panel-control').length, 1);
+  release();
+  assert.ok((await pending).capture);
+  assert.equal(service.getState().busy, false);
+});
+
+test('hardware settings replies are presented as raw records with interpretation pending', async (t) => {
+  const { service, calls } = await makeFixture(t);
+  await hardwareConnect(service);
+  const result = await service.readSettings();
+  assert.match(result.message, /raw.*numeric interpretation.*validation/i);
+  assert.equal(result.record.interpretation_verified, false);
+  const requests = calls.filter(request => request.action === 'read-settings');
+  assert.equal(requests.length, 1);
+  assert.ok(path.isAbsolute(requests[0].log_dir));
+  assert.equal(calls.filter(request => request.action === 'screenshot').length, 0);
 });

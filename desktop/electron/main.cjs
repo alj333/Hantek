@@ -68,7 +68,7 @@ async function start() {
     if (event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame || !event.senderFrame.url.startsWith('hantek://app/')) throw new Error('Untrusted application request.');
     return handler(...args);
   });
-  for (const method of ['getState', 'connect', 'disconnect', 'checkConnection', 'capture', 'setAcquisition', 'updateSettings', 'listCaptures', 'updateCapture']) register(method, (...args) => service[method](...args));
+  for (const method of ['getState', 'connect', 'disconnect', 'checkConnection', 'capture', 'setAcquisition', 'panelAction', 'readSettings', 'updateSettings', 'listCaptures', 'updateCapture']) register(method, (...args) => service[method](...args));
   register('chooseStorageDirectory', async () => {
     if (service.state.busy) throw new Error('Wait for the scope operation to finish.');
     const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose capture folder', defaultPath: service.state.settings.storageDir, properties: ['openDirectory', 'createDirectory'] });

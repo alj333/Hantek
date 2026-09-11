@@ -1,8 +1,9 @@
 """Small DSO5102P WinUSB client. Python standard library; no external packages.
 
 Identify reads USB descriptors. Echo and screenshot leave acquisition unchanged.
-Explicit acquisition-start / acquisition-stop commands change only this scope's
-acquisition state. They are unrelated to CNC machine operation. No panel locks,
+Explicit acquisition and named ordinary panel commands change only this scope.
+Raw settings readback makes no assumptions about field layout or units.
+These operations are unrelated to CNC machine operation. No panel locks,
 instrument filesystem access, shell/debug commands, resets, firmware operations,
 or driver installation are implemented.
 
@@ -32,6 +33,8 @@ import time
 import uuid
 import zlib
 
+import scope_controls
+
 VID, PID = 0x049F, 0x505A
 WIDTH, HEIGHT = 800, 480
 MAX_IMAGE_BYTES = WIDTH * HEIGHT * 2
@@ -44,6 +47,9 @@ TRANSACTION_SECONDS = 30
 KNOWN_ACQUISITION_ACKS = frozenset((b"\x00", b"\x01\x00", b"\x00\x00", b"\x00\x01"))
 OBSERVED_ASYNC_ACKS = frozenset((b"\x00", b"\x01\x00"))
 MAX_ASYNC_ACKS = 8
+MAX_SETTINGS_BYTES = 65533  # One maximum-length frame minus command/checksum.
+MAX_CONTROL_WIRE_BYTES = 65536
+PANEL_SETTLE_SECONDS = 0.2
 DEFAULT_INTERFACE_GUID = "5cb35641-beea-4a98-b06b-3cf4dca1911b"
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CAPTURE_DIR = REPOSITORY_ROOT / "artifacts" / "captures"
@@ -72,11 +78,13 @@ def output_directory(value):
 
 def request_packet(command, payload=b""):
     """Allow observational requests and the two explicit acquisition actions."""
-    if command not in (0x00, 0x12, 0x20):
+    if command not in (0x00, 0x01, 0x12, 0x13, 0x20):
         raise ScopeError("Command is outside the scope allowlist")
     if command == 0x12 and payload not in (b"\x00\x00", b"\x00\x01"):
         raise ScopeError("Only scope acquisition start/stop payloads are allowed")
-    if (command == 0x20 and payload) or len(payload) > 256:
+    if command == 0x13 and not scope_controls.allowed_payload(payload):
+        raise ScopeError("Only catalogued ordinary panel keys with a single press are allowed")
+    if (command in (0x01, 0x20) and payload) or len(payload) > 256:
         raise ScopeError("Invalid request payload")
     packet = b"\x53" + struct.pack("<H", len(payload) + 2)
     packet += bytes((command,)) + bytes(payload)
@@ -85,7 +93,8 @@ def request_packet(command, payload=b""):
 
 class FrameReader:
     """USB reads may split protocol frames or return several in one read."""
-    def __init__(self, read, deadline, wire_sink=None):
+    def __init__(self, read, deadline, wire_sink=None, *, max_wire_bytes=MAX_WIRE_BYTES,
+                 max_frames=MAX_FRAMES):
         self.read = read
         self.deadline = deadline
         self.buffer = bytearray()
@@ -94,6 +103,8 @@ class FrameReader:
         self.wire_sink = wire_sink
         self.last_frame = None
         self.async_ack_packets = []
+        self.max_wire_bytes = max_wire_bytes
+        self.max_frames = max_frames
 
     def _fill(self, count):
         while len(self.buffer) < count:
@@ -103,7 +114,7 @@ class FrameReader:
             if not block:
                 raise ScopeError("USB returned an empty transfer before completion")
             self.total += len(block)
-            if self.total > MAX_WIRE_BYTES:
+            if self.total > self.max_wire_bytes:
                 raise ScopeError("Response exceeded the bounded transfer size")
             if self.wire_sink:
                 self.wire_sink.write(block)
@@ -111,7 +122,7 @@ class FrameReader:
 
     def _next_frame(self):
         self.frames += 1
-        if self.frames > MAX_FRAMES:
+        if self.frames > self.max_frames:
             raise ScopeError("Too many response frames")
         self._fill(3)
         if self.buffer[0] != 0x53:
@@ -437,12 +448,170 @@ class WinUsbScope:
         self.close()
 
 
+def _write_operation_record(path, metadata, mode="w"):
+    with path.open(mode, encoding="utf-8") as log:
+        json.dump(metadata, log, indent=2)
+
+
+def _check_transaction_deadline(deadline):
+    if time.monotonic() >= deadline:
+        raise ScopeError("Transaction exceeded its 30-second deadline; no further gesture sent")
+
+
+def panel_control(device, control_id, count, log_dir):
+    """Send only explicitly requested gestures, preserving each progress stage.
+
+    Normal 0x93 contains a pre-action menu ID, not proof of execution. A single
+    observational echo follows each acknowledged key because the related-model
+    implementation reports that its arrival processes a buffered gesture. No
+    gesture or echo is retried, and neither is interpreted as a state readback.
+    """
+    control = scope_controls.control_spec(control_id, count)
+    payload = bytes((control["keycode"], 1))
+    packet = request_packet(0x13, payload)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    log_path = log_dir / ("panel-control-" + stamp + ".json")
+    wire_path = log_dir / ("panel-control-" + stamp + ".wire.bin")
+    metadata = {"requested_at_utc": stamp, "command": "panel-control",
+                "control": control_id, "label": control["label"], "count": count,
+                "device": device.metadata, "validation": control["validation"],
+                "context_dependent": control["context_dependent"],
+                "status": "prepared", "instrument_state_verified": False,
+                "send_attempted_count": 0, "sent_count": 0,
+                "acknowledged_count": 0, "completed_count": 0,
+                "gesture_records": [], "log_path": str(log_path.resolve()),
+                "wire_path": str(wire_path.resolve()),
+                "ack_semantics": "0x93 is the pre-action menu ID. Echo checks communication after the key; neither verifies execution. Inspect the resulting screen."}
+    _write_operation_record(log_path, metadata, "x")
+    reader = None
+    try:
+        with wire_path.open("xb") as wire:
+            deadline = time.monotonic() + TRANSACTION_SECONDS
+            reader = FrameReader(device.read, deadline, wire,
+                                 max_wire_bytes=MAX_CONTROL_WIRE_BYTES, max_frames=32)
+            for index in range(count):
+                _check_transaction_deadline(deadline)
+                gesture = {"index": index + 1, "request_hex": packet.hex(),
+                           "status": "send_attempted_result_unknown"}
+                metadata["gesture_records"].append(gesture)
+                metadata["send_attempted_count"] += 1
+                metadata["status"] = "send_attempted_result_unknown"
+                # This record closes before each potentially state-changing send.
+                _write_operation_record(log_path, metadata)
+                device.send(0x13, payload)
+                metadata["sent_count"] += 1
+                gesture["status"] = "awaiting_acknowledgement"
+                _write_operation_record(log_path, metadata)
+                answer = reader.next(0x93, allow_observed_async_ack=True)
+                gesture["ack_packet_hex"] = reader.last_frame.hex()
+                gesture["ack_payload_hex"] = answer.hex()
+                if len(answer) != 1:
+                    raise ScopeError("Panel acknowledgement must contain exactly one pre-action menu ID")
+                gesture["menu_id_before_action"] = answer[0]
+                metadata["acknowledged_count"] += 1
+                gesture["status"] = "acknowledged_execution_unverified"
+                _write_operation_record(log_path, metadata)
+                # The first live key changed the screen but an immediate echo
+                # timed out. Allow the panel handler to settle before the one
+                # observational follow-up; this never resends the gesture.
+                time.sleep(PANEL_SETTLE_SECONDS)
+                _check_transaction_deadline(deadline)
+                token = ("panel-check-" + secrets.token_hex(8)).encode("ascii")
+                gesture["echo_request_hex"] = request_packet(0x00, token).hex()
+                gesture["status"] = "echo_send_attempted"
+                _write_operation_record(log_path, metadata)
+                device.send(0x00, token)
+                echoed = reader.next(0x80, allow_observed_async_ack=True)
+                gesture["echo_packet_hex"] = reader.last_frame.hex()
+                if echoed != token or reader.buffer:
+                    raise ScopeError("Panel echo token mismatch or trailing response data")
+                gesture["status"] = "ack_and_echo_received_execution_unverified"
+                metadata["completed_count"] += 1
+                _write_operation_record(log_path, metadata)
+                if index + 1 < count:
+                    time.sleep(PANEL_SETTLE_SECONDS)
+            metadata["status"] = "replies_received_execution_unverified"
+    except (Exception, KeyboardInterrupt) as error:
+        metadata["error"] = str(error) or type(error).__name__
+        raise
+    finally:
+        if reader is not None:
+            metadata["asynchronous_ack_packets"] = reader.async_ack_packets
+            metadata["received_bytes"] = reader.total
+            metadata["frame_count"] = reader.frames
+        if wire_path.exists():
+            metadata["wire_sha256"] = hashlib.sha256(wire_path.read_bytes()).hexdigest()
+        try:
+            _write_operation_record(log_path, metadata)
+        finally:
+            print(json.dumps(metadata, indent=2))
+
+
+def read_settings(device, log_dir):
+    """Preserve one normal SYSData reply without assuming a firmware layout."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    base = log_dir / ("read-settings-" + stamp)
+    log_path = Path(str(base) + ".json")
+    raw_path = Path(str(base) + ".settings.bin")
+    wire_path = Path(str(base) + ".wire.bin")
+    metadata = {"requested_at_utc": stamp, "command": "read-settings",
+                "device": device.metadata, "request_hex": request_packet(0x01).hex(),
+                "status": "incomplete", "instrument_settings_changed": False,
+                "decoded": False, "settings_verified": False,
+                "interpretation": "Raw SYSData only. This firmware's field layout, units and numeric values have not been validated.",
+                "log_path": str(log_path.resolve()), "raw_path": str(raw_path.resolve()),
+                "wire_path": str(wire_path.resolve())}
+    _write_operation_record(log_path, metadata, "x")
+    reader = None
+    try:
+        with wire_path.open("xb") as wire:
+            deadline = time.monotonic() + TRANSACTION_SECONDS
+            reader = FrameReader(device.read, deadline, wire,
+                                 max_wire_bytes=MAX_SETTINGS_BYTES + 5 + 8 * 7,
+                                 max_frames=10)
+            device.send(0x01)
+            answer = reader.next(0x81, allow_observed_async_ack=True)
+            with raw_path.open("xb") as raw:
+                raw.write(answer)
+            metadata.update(payload_bytes=len(answer), payload_hex=answer.hex(),
+                            frame_checksum_verified=True,
+                            sha256=hashlib.sha256(answer).hexdigest())
+            if not answer or len(answer) > MAX_SETTINGS_BYTES:
+                raise ScopeError("Settings reply is empty or exceeds one bounded SYSData frame")
+            if reader.buffer:
+                raise ScopeError("Unexpected trailing settings response data")
+            metadata["status"] = "complete_raw_uninterpreted"
+    except (Exception, KeyboardInterrupt) as error:
+        metadata["error"] = str(error) or type(error).__name__
+        raise
+    finally:
+        if reader is not None:
+            metadata["asynchronous_ack_packets"] = reader.async_ack_packets
+            metadata["received_bytes"] = reader.total
+            metadata["frame_count"] = reader.frames
+        if wire_path.exists():
+            metadata["wire_sha256"] = hashlib.sha256(wire_path.read_bytes()).hexdigest()
+        try:
+            _write_operation_record(log_path, metadata)
+        finally:
+            print(json.dumps(metadata, indent=2))
+
+
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--guid", help="Override HANTEK_INTERFACE_GUID or the dedicated WinUSB interface GUID")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("identify", help="Read USB descriptors; no scope protocol command")
     commands.add_parser("echo", help="One unique normal-protocol echo test")
+    commands.add_parser("controls", help="List named ordinary controls; never accesses USB")
+    panel = commands.add_parser("panel-control", help="Send a named ordinary panel gesture; verify the scope screen")
+    panel.add_argument("control", help="Named control ID from the offline controls catalog")
+    panel.add_argument("--count", type=int, default=1, help="Rotary gestures 1..5; buttons exactly 1")
+    panel.add_argument("--log-dir", type=output_directory, default=DEFAULT_LOG_DIR)
+    settings = commands.add_parser("read-settings", help="Save bounded raw SYSData; no numeric decoding")
+    settings.add_argument("--log-dir", type=output_directory, default=DEFAULT_LOG_DIR)
     for action in ("acquisition-start", "acquisition-stop"):
         action_parser = commands.add_parser(
             action, help="Explicitly change oscilloscope acquisition; never operates a CNC")
@@ -456,7 +625,12 @@ def parse_arguments(argv=None):
     decode.add_argument("png", type=Path)
     decode.add_argument("--pixel-order", choices=("little", "big"), default="little")
     args = parser.parse_args(argv)
-    if args.command != "decode":
+    if args.command == "panel-control":
+        try:
+            scope_controls.control_spec(args.control, args.count)
+        except ValueError as error:
+            parser.error(str(error))
+    if args.command not in ("decode", "controls"):
         try:
             args.guid = configured_interface_guid(args.guid)
         except ValueError as error:
@@ -466,6 +640,9 @@ def parse_arguments(argv=None):
 
 def main(argv=None):
     args = parse_arguments(argv)
+    if args.command == "controls":
+        print(json.dumps(scope_controls.public_catalog(), indent=2))
+        return
     if args.command == "decode":
         pixels = args.raw.read_bytes()
         with args.png.open("xb") as output:
@@ -485,6 +662,10 @@ def main(argv=None):
                 raise ScopeError("Echo token mismatch or trailing response")
             print(json.dumps({"echo": "ok", "token": token.decode(),
                               "instrument_settings_changed": False}))
+        elif args.command == "panel-control":
+            panel_control(scope, args.control, args.count, args.log_dir)
+        elif args.command == "read-settings":
+            read_settings(scope, args.log_dir)
         elif args.command in ("acquisition-start", "acquisition-stop"):
             args.log_dir.mkdir(parents=True, exist_ok=True)
             stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")

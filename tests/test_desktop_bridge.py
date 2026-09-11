@@ -46,15 +46,20 @@ class DesktopBridgeChecks(unittest.TestCase):
     def client_result(arguments):
         print(json.dumps({"arguments": arguments, "instrument_state_verified": False}, indent=2))
 
-    def test_all_five_actions_translate_to_only_allowed_cli_arguments(self):
+    def test_all_actions_translate_to_only_allowed_cli_arguments(self):
         for action in bridge.ACTIONS:
             with self.subTest(action=action), mock.patch.object(scope, "main", side_effect=self.client_result) as client:
                 request = {"action": action}
                 expected = ["--guid", scope.DEFAULT_INTERFACE_GUID, action]
-                if action == "screenshot":
+                if action == "controls":
+                    expected = ["controls"]
+                elif action == "screenshot":
                     request["output_dir"] = str(self.root / "captures")
                     expected += ["--output-dir", str(self.root / "captures")]
-                elif action.startswith("acquisition-"):
+                elif action in bridge.LOG_ACTIONS:
+                    if action == "panel-control":
+                        request.update(control="ch1-scale-plus", count=2)
+                        expected += ["ch1-scale-plus", "--count", "2"]
                     request["log_dir"] = str(self.root / "logs")
                     expected += ["--log-dir", str(self.root / "logs")]
                 response = self.run_bridge(request)
@@ -78,6 +83,15 @@ class DesktopBridgeChecks(unittest.TestCase):
                  {"action": "echo", "log_dir": str(self.root)},
                  {"action": "screenshot", "output_dir": str(self.root), "pixel_order": "big"},
                  {"action": "screenshot", "output_dir": str(self.root), "log_dir": str(self.root)}]
+        cases += [{"action": "read-settings"}, {"action": "panel-control", "log_dir": str(self.root)},
+                  {"action": "controls", "guid": scope.DEFAULT_INTERFACE_GUID},
+                  {"action": "identify", "count": 1}, {"action": "echo", "control": "autoset"}]
+        for control, count in [("default-setup", 1), ("utility-menu", 1), (19, 1),
+                               ("ch1-scale-plus", 0), ("ch1-scale-plus", 6),
+                               ("ch1-scale-plus", True), ("ch1-scale-plus", 1.0),
+                               ("ch1-scale-plus", "1"), ("autoset", 2)]:
+            cases.append({"action": "panel-control", "control": control, "count": count,
+                          "log_dir": str(self.root)})
         with mock.patch.object(scope, "main") as client:
             for request in cases:
                 with self.subTest(request=request):
@@ -211,6 +225,16 @@ class DesktopBridgeChecks(unittest.TestCase):
         self.device.assert_called_once_with(scope.DEFAULT_INTERFACE_GUID)
         self.device.return_value.__enter__.assert_called_once()
         self.device.return_value.__exit__.assert_called_once_with(None, None, None)
+
+    def test_actual_controls_catalog_is_offline_even_with_invalid_guid_environment(self):
+        with mock.patch.dict(os.environ, {"HANTEK_INTERFACE_GUID": "invalid"}):
+            response = self.run_bridge({"action": "controls"})
+        self.assertTrue(response["ok"])
+        self.assertFalse(response["result"]["hardware_access"])
+        self.assertEqual(response["result"]["schema_version"], 1)
+        self.assertEqual(len(response["result"]["controls"]), 39)
+        self.assertTrue(all("keycode" not in entry for entry in response["result"]["controls"]))
+        self.device.assert_not_called()
 
 
 if __name__ == "__main__":

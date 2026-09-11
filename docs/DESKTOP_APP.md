@@ -1,8 +1,8 @@
 # Hantek Studio desktop app
 
 Hantek Studio is a local Windows app for the owner's Hantek DSO5102P. It provides
-a screen workspace, saved-capture library and explicit acquisition Run/Stop
-controls. The app uses the same bounded USB client as the repository's AI tools.
+a screen workspace, saved-capture library, explicit acquisition Run/Stop and
+39 ordinary front-panel controls. The app uses the same bounded USB client as the repository's AI tools.
 It does not contain an AI chat or require an API key.
 
 The Windows package includes Electron and Python. **Using the built app does not
@@ -10,8 +10,9 @@ require installing Python, Node.js or the Hantek desktop software.** A new PC
 still needs the one-time Microsoft WinUSB binding described in
 [Windows setup](SETUP_WINDOWS.md). The app does not install or change drivers.
 
-This guide describes version 0.1.0. See the
-[desktop validation record](sessions/2026-09-11-desktop.md) for completed checks
+This guide describes version 0.2.0. See the [control guide](CONTROLS.md),
+[bench checklist](CONTROLS_CHECKLIST.md), [controls validation record](sessions/2026-09-11-controls.md)
+and original [desktop validation record](sessions/2026-09-11-desktop.md) for completed checks
 and any outstanding validation; the original CLI's live results do not by
 themselves establish that the packaged desktop app has been tested on hardware.
 
@@ -20,7 +21,7 @@ themselves establish that the packaged desktop app has been tested on hardware.
 After a successful build, double-click:
 
 ```text
-C:\Github\Hantek\desktop\release\Hantek-Studio-0.1.0-Windows.exe
+C:\Github\Hantek\desktop\release\Hantek-Studio-0.2.0-Windows.exe
 ```
 
 This portable package runs without installing an application. The repository
@@ -84,6 +85,14 @@ closing the app leaves the scope's acquisition state unchanged.
 
 ## Files and preferences
 
+The **Controls** view adds channels, horizontal/timebase, trigger, acquisition,
+measurement, display, cursor, math and soft-key gestures alongside a fresh scope
+screen. Rotary controls allow 1–5 steps per click; buttons allow one press.
+The [control guide](CONTROLS.md) explains menus, interpretation and AI commands.
+Control requests stop automatic preview and are never retried automatically.
+The app does not infer numeric settings from the pixels or acknowledge a value
+as applied without a human/agent inspecting the displayed result.
+
 When launched from this repository's build/launcher arrangement, local files
 use these directories:
 
@@ -91,7 +100,8 @@ use these directories:
 | --- | --- |
 | `.local/desktop-profile/` | App preferences and temporary preview data |
 | `artifacts/captures/` | Saved hardware screenshots and original transfer evidence |
-| `artifacts/logs/` | Explicit acquisition-request logs |
+| `artifacts/logs/` | Acquisition/panel-request logs and raw settings records |
+| `artifacts/demo/logs/` | Clearly labelled simulated control requests |
 | `artifacts/demo/captures/` | Clearly identified generated demo images and metadata |
 
 When the package is moved outside the repository, it uses the Windows user's
@@ -122,8 +132,8 @@ not the scope's serial number.
 ## Use alongside an AI agent
 
 The existing `scripts/scope.ps1` launcher and `src/hantek_scope.py` CLI remain
-available. An agent can identify, echo, capture and request authorized
-acquisition changes without driving the desktop interface. See the
+available. An agent can identify, echo, capture, list controls, save a settings
+record and request authorized acquisition or panel changes without driving the desktop interface. See the
 [operating guide](OPERATIONS.md) for cross-project commands and output paths.
 
 The desktop app opens USB only for an individual operation, so the CLI can use
@@ -171,6 +181,9 @@ python -m unittest discover -s tests -v
 python .\src\desktop_bridge.py --self-test
 Set-Location .\desktop
 npm test
+npm run test:ui
+npm run test:controls
+npm run test:preview-failures
 npm run build
 ```
 
@@ -204,10 +217,13 @@ Keep these boundaries intact when extending the interface.
 
 `src/desktop_bridge.py` accepts exactly one UTF-8 JSON object on stdin, at most
 16384 bytes. The caller must close stdin after writing. The only actions are
-`identify`, `echo`, `screenshot`, `acquisition-start`, and `acquisition-stop`.
+`identify`, `echo`, `screenshot`, `acquisition-start`, `acquisition-stop`,
+`controls` (offline), `panel-control`, and `read-settings`.
 An optional `guid` follows the CLI's interface configuration. A screenshot
-requires an absolute local `output_dir`; acquisition actions require an
-absolute local `log_dir`. Unrelated directory keys, unknown keys, invalid
+requires an absolute local `output_dir`; acquisition, panel-control and
+read-settings require an absolute local `log_dir`. Panel-control additionally
+requires a catalog `control` ID and accepts an integer `count` (default 1).
+Unrelated keys, unknown keys, invalid
 configuration and unsupported actions fail before device access.
 
 The adapter writes exactly one JSON response line. A handled request exits zero;
@@ -229,9 +245,10 @@ or broaden the desktop bridge into a raw-command or filesystem interface.
 
 ## Limits and troubleshooting
 
-- Voltage range, timebase and trigger adjustment, raw waveform extraction and
-  calibrated signal analysis are not implemented. The screen's RGB565 data is
-  displayed pixels, not ADC samples. These remain separate future capabilities.
+- Voltage range, timebase and trigger adjustment are available as named panel
+  gestures. Absolute setters, calibrated settings readback, raw waveform
+  extraction and signal analysis are not implemented. The screen's RGB565 data
+  is displayed pixels, not ADC samples.
 - Demo images never represent a measurement from the connected instrument.
 - The connection has been established for one DSO5102P; other models and
   firmware are unverified.
@@ -247,7 +264,7 @@ or broaden the desktop bridge into a raw-command or filesystem interface.
 - For pending status packets, failed transfers or a driver warning, follow
   [Windows recovery notes](SETUP_WINDOWS.md#recovery). Keep Windows Memory
   Integrity and driver-signature enforcement enabled.
-- The app does not configure probes, grounding, a DUT, signal generators or
+- The app cannot move a physical probe switch or configure grounding, a DUT, signal generators or
   production machinery. A successful capture does not validate measurement
   accuracy or establish safe physical connections.
 

@@ -3,7 +3,8 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { test } = require('node:test');
-const { parseBridgeOutput, runBridge } = require('../electron/bridge.cjs');
+const path = require('node:path');
+const { parseBridgeOutput, runBridge, runtimeCommand } = require('../electron/bridge.cjs');
 
 const COMMAND = { executable: 'C:\\Scope App\\scope-bridge.exe', args: ['fixed-script.py'] };
 const REQUEST = { action: 'identify', guid: '5cb35641-beea-4a98-b06b-3cf4dca1911b' };
@@ -175,4 +176,40 @@ test('missing JSON reports bounded stderr while malformed JSON is never accepted
   second.child.stdout.emit('data', '{truncated');
   second.child.emit('close', 0);
   await malformed;
+});
+
+test('catalog, named panel and settings requests reach the child bridge without a shell', async () => {
+  const requests = [
+    { action: 'controls' },
+    { action: 'panel-control', guid: REQUEST.guid, control: 'measure-menu', count: 1, log_dir: 'C:\\Scope Project\\logs' },
+    { action: 'read-settings', guid: REQUEST.guid, log_dir: 'C:\\Scope Project\\logs' },
+  ];
+  for (const request of requests) {
+    const { child, spawns, promise } = startMock(request);
+    assert.equal(spawns.length, 1, `${request.action} must pass the Node action allowlist`);
+    assert.deepEqual(JSON.parse(child.input), request);
+    assert.equal(spawns[0][2].shell, false);
+    assert.equal(spawns[0][2].windowsHide, true);
+    const result = request.action === 'controls'
+      ? { hardware_access: false, controls: [{ id: 'measure-menu' }] }
+      : { status: 'complete', instrument_state_verified: false };
+    sendResult(child, result);
+    assert.deepEqual(await promise, result);
+    assert.equal(spawns.length, 1);
+  }
+});
+
+test('real Node to Python bridge loads the control catalog offline', async () => {
+  const repoRoot = path.resolve(__dirname, '..', '..');
+  const command = runtimeCommand({ packaged: false, repoRoot });
+  // `controls` returns before device discovery in the real Python client.
+  // This intentionally exercises both allowlists, JSON envelopes and packaging inputs.
+  const result = await runBridge(command, { action: 'controls' }, { timeoutMs: 10000 });
+  assert.equal(result.hardware_access, false);
+  assert.ok(Array.isArray(result.controls) && result.controls.length > 0);
+  const { publicControls } = require('../electron/control-catalog.cjs');
+  assert.deepEqual(result.controls.map(control => control.id).sort(), publicControls.map(control => control.id).sort());
+  assert.ok(result.controls.some(control => control.kind === 'button'));
+  assert.ok(result.controls.some(control => control.kind === 'rotary'));
+  assert.ok(result.controls.every(control => !Object.hasOwn(control, 'keycode')));
 });

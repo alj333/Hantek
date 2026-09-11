@@ -31,7 +31,7 @@ function parseBridgeOutput(output, code) {
   return value.result;
 }
 function runBridge(command, request, { timeoutMs = 45000, spawnProcess = spawn } = {}) {
-  if (!['identify', 'echo', 'screenshot', 'acquisition-start', 'acquisition-stop'].includes(request.action)) return Promise.reject(new Error('Unsupported scope action.'));
+  if (!['identify', 'echo', 'screenshot', 'acquisition-start', 'acquisition-stop', 'controls', 'panel-control', 'read-settings'].includes(request.action)) return Promise.reject(new Error('Unsupported scope action.'));
   const input = JSON.stringify(request);
   if (Buffer.byteLength(input) > 16384) return Promise.reject(new Error('Scope request is too large.'));
   return new Promise((resolve, reject) => {
