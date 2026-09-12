@@ -1,7 +1,7 @@
 {
   "name": "hantek-studio",
   "productName": "Hantek Studio",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local Hantek DSO5102P front-panel control and capture workspace",
   "private": true,
   "author": "Hantek Studio contributors",
@@ -14,7 +14,8 @@
     "test:ui": "node tests/desktop-smoke.cjs",
     "test:controls": "node tests/controls-ui.cjs",
     "test:preview-failures": "node tests/preview-failures-ui.cjs",
-    "package:win": "electron-builder --win portable --x64 --publish never"
+    "package:win": "electron-builder --win portable --x64 --publish never",
+    "test:redesign": "node tests/redesign-ui.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.577.0",
@@ -55,6 +56,10 @@
       {
         "from": "../src/control_catalog.json",
         "to": "control_catalog.json"
+      },
+      {
+        "from": "renderer/assets/fonts/Inter-LICENSE.txt",
+        "to": "licenses/Inter-LICENSE.txt"
       }
     ],
     "asar": true,

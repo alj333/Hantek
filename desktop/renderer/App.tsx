@@ -34,24 +34,6 @@ function SourceBadge({ source }: { source: ScopeMode }) {
   return <span className={`source-badge ${source}`}><span />{source === 'demo' ? 'DEMO' : 'HARDWARE'}</span>;
 }
 
-function Graticule() {
-  return <svg className="empty-graticule" viewBox="0 0 800 480" aria-hidden="true">
-    <defs>
-      <pattern id="minor-grid" width="20" height="20" patternUnits="userSpaceOnUse">
-        <path d="M 20 0 L 0 0 0 20" fill="none" stroke="currentColor" strokeWidth="0.5" />
-      </pattern>
-      <pattern id="major-grid" width="80" height="80" patternUnits="userSpaceOnUse">
-        <rect width="80" height="80" fill="url(#minor-grid)" />
-        <path d="M 80 0 L 0 0 0 80" fill="none" stroke="currentColor" strokeWidth="0.8" />
-      </pattern>
-      <radialGradient id="grid-shade"><stop offset="0%" stopColor="#111e25" stopOpacity=".97" /><stop offset="100%" stopColor="#111e25" stopOpacity="0" /></radialGradient>
-    </defs>
-    <rect width="800" height="480" fill="url(#major-grid)" />
-    <path d="M 400 0 V 480 M 0 240 H 800" stroke="currentColor" strokeDasharray="2 7" />
-    <rect width="800" height="480" fill="url(#grid-shade)" />
-  </svg>;
-}
-
 function Screen({ capture, connected, mode, now, interval, invalidated, reserveBelow }: {
   capture: Capture | null; connected: boolean; mode: ScopeMode; now: number; interval: number; invalidated: boolean; reserveBelow?: number;
 }) {
@@ -86,7 +68,6 @@ function Screen({ capture, connected, mode, now, interval, invalidated, reserveB
     </div>
     <div className="scope-screen" ref={stage} style={stageHeight === undefined ? undefined : { height: stageHeight }}>
       {capture ? <img src={capture.imageUrl} alt={`${capture.source === 'demo' ? 'Demo ' : ''}oscilloscope screen captured ${dateTime(capture.createdAt)}`} /> : <>
-        <Graticule />
         <div className="screen-empty">
           <span className="screen-empty-icon"><Monitor size={30} strokeWidth={1.25} /></span>
           <h2>{connected ? 'Ready for your first capture' : mode === 'demo' ? 'A place to explore' : 'Your instrument, in view'}</h2>
@@ -225,7 +206,7 @@ export default function App() {
   const filteredCaptures = sortedCaptures.filter((capture) =>
     (sourceFilter === 'all' || capture.source === sourceFilter) &&
     `${capture.label} ${capture.notes} ${dateTime(capture.createdAt)}`.toLowerCase().includes(search.toLowerCase()));
-  const recentActivity = [...state.activity].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 5);
+  const recentActivity = [...state.activity].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 3);
   const busy = Boolean(operation || state.busy);
   const ready = loaded && !busy;
   const captureReady = ready && state.connected;
@@ -325,11 +306,13 @@ export default function App() {
     stopRefresh(); setSelectedId(id ?? null); setView('captures'); setNotice(null);
   };
 
+  const demoBanner = demo && <div className="demo-ribbon"><Info size={15} /><strong>DEMO MODE</strong><span>Simulated scope. No USB device commands are sent.</span></div>;
+
   return <div className="app-layout">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark"><ActivityIcon size={26} strokeWidth={1.8} /></span>
-        <div><strong>Hantek<span>Studio</span></strong><small>THE CONNECTED BENCH</small></div></div>
-      <div className="nav-heading">YOUR INSTRUMENT</div>
+        <div><strong>Hantek <span>Studio</span></strong><small>INSTRUMENT WORKSPACE</small></div></div>
+      <div className="nav-heading">WORKBENCH</div>
       <nav aria-label="Main navigation">
         <button className={`nav-item ${view === 'workspace' ? 'active' : ''}`} onClick={() => navigate('workspace')} aria-current={view === 'workspace' ? 'page' : undefined}><LayoutDashboard size={18} />Workspace<span className="nav-current-dot" /></button>
         <button className={`nav-item ${view === 'controls' ? 'active' : ''}`} onClick={() => navigate('controls')} aria-current={view === 'controls' ? 'page' : undefined}><SlidersHorizontal size={18} />Controls<span className="nav-current-dot" /></button>
@@ -355,15 +338,16 @@ export default function App() {
       </header>
       <main className={`main-content view-${view}`}>
         {notice && <div className={`notice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}><span>{notice.kind === 'success' ? <Check size={17} /> : <Info size={17} />}</span><p>{notice.message}</p><button aria-label="Dismiss message" className="icon-button" onClick={() => setNotice(null)}><X size={16} /></button></div>}
-        {demo && <div className="demo-ribbon"><span className="demo-ribbon-dot" />Demo workspace<span>Simulated screens. Your scope is not accessed.</span></div>}
+        {view !== 'workspace' && demoBanner}
 
         {view === 'workspace' && <>
-          <div className="page-heading workspace-heading"><div><h1>Scope workspace</h1></div><button className="button secondary" onClick={() => openLibrary()}><Images size={16} />Capture library<ArrowRight size={14} /></button></div>
+          <div className="page-heading workspace-heading"><div><h1>Scope workspace</h1><p>Screen capture and instrument control.</p></div><button className="button secondary" onClick={() => openLibrary()}><Images size={16} />Capture library<ArrowRight size={14} /></button></div>
+          {demoBanner}
           <div className="workspace-grid">
             <section className="instrument-panel" aria-label="Oscilloscope workspace">
               <div className="instrument-heading"><div className="instrument-icon"><Monitor size={22} strokeWidth={1.5} /></div><div><h2>{demo ? 'Demo oscilloscope' : state.device?.model ?? 'Hantek DSO5102P'}</h2><p>{demo ? 'Simulated instrument preview' : 'Digital storage oscilloscope'}</p></div><span className={`connection-pill ${state.connected ? 'connected' : ''}`}><span />{state.connected ? 'Connected' : 'Disconnected'}</span></div>
               <div className="instrument-toolbar"><div className="toolbar-actions"><button className="button primary" disabled={!captureReady} onClick={() => { void takeCapture(); }}><Camera size={16} />Save capture</button><div className="acquisition-buttons"><button className="button quiet" disabled={!captureReady} onClick={() => { void acquisition('start'); }} title="Request that the oscilloscope resume acquisition"><Play size={14} />Run</button><button className="button quiet" disabled={!captureReady} onClick={() => { void acquisition('stop'); }} title="Request that the oscilloscope stop acquisition"><Square size={13} />Stop</button></div></div>
-                <label className="auto-refresh-control"><input type="checkbox" role="switch" checked={autoRefresh} disabled={!state.connected || !loaded || (busy && !autoRefresh)} onChange={(event) => { if (event.target.checked) setAutoRefresh(true); else stopRefresh(); }} /><span className="switch-track"><span /></span><span>Auto-refresh<small>Every {Math.max(3000, state.settings.refreshIntervalMs) / 1000}s</small></span></label>
+                <div className="preview-tools"><button className="icon-button refresh-preview" aria-label="Refresh preview" title="Refresh preview" disabled={!captureReady} onClick={() => { stopRefresh(); void takeCapture(false); }}><RefreshCw size={16} /></button><label className="auto-refresh-control"><input type="checkbox" role="switch" checked={autoRefresh} disabled={!state.connected || !loaded || (busy && !autoRefresh)} onChange={(event) => { if (event.target.checked) setAutoRefresh(true); else stopRefresh(); }} /><span className="switch-track"><span /></span><span>Auto-refresh<small>Every {Math.max(3000, state.settings.refreshIntervalMs) / 1000}s</small></span></label></div>
               </div>
               <Screen capture={latest} connected={state.connected} mode={state.settings.mode} now={now} interval={state.settings.refreshIntervalMs} invalidated={previewInvalidated} />
               <div className="instrument-footnote"><Info size={14} /><span>Run and Stop request a change to scope acquisition. Verify the resulting indicator on the captured screen.</span>{latest && (latest.saved ? <button className="text-button" onClick={() => openLibrary(latest.id)}>View capture<ArrowRight size={13} /></button> : <div className="preview-actions"><button className="text-button" disabled={!ready} onClick={() => { void exportCapture(latest); }}>Export preview<ArrowDownToLine size={13} /></button><button className="icon-button" disabled={!ready} aria-label="Show preview in folder" onClick={() => { void revealCapture(latest); }}><FolderOpen size={13} /></button></div>)}</div>
@@ -376,12 +360,13 @@ export default function App() {
                 <div className="session-row"><span>Saved captures</span><strong>{state.captures.length.toString().padStart(2, '0')}</strong></div>
                 <div className="storage-summary"><Folder size={17} /><div><span>CAPTURE STORAGE</span><p title={state.settings.storageDir}>{state.settings.storageDir || 'Loading storage location…'}</p></div><button className="icon-button" aria-label="Open storage folder" disabled={!ready || !state.settings.storageDir} onClick={() => { void withOperation('Opening storage', () => window.scopeApp.openStorage()); }}><ArrowRight size={15} /></button></div>
               </section>
-              <section className="capture-tip"><span className="tip-icon"><Images size={21} /></span><p className="eyebrow">A RECORD OF YOUR BENCH</p><h3>Keep the useful moments.</h3><p>Save a screen, add a note, and return to it when you need the context.</p><button className="text-button" onClick={() => openLibrary()}>Explore your captures<ArrowRight size={14} /></button><div className="tip-decoration" aria-hidden="true"><span /><span /><span /><span /><span /><span /><span /></div></section>
+              <section className="card controls-shortcut"><h2>Instrument controls</h2><p>Adjust the front panel with the scope screen in view.</p><ul><li><ActivityIcon size={18} /><span>Channel controls<span className="channel-mark ch1">CH1</span><span className="channel-mark ch2">CH2</span></span></li><li><Clock3 size={18} />Timebase and position</li><li><SlidersHorizontal size={18} />Trigger and menus</li></ul><button className="button primary" onClick={() => navigate('controls')}><SlidersHorizontal size={15} />Open controls<ArrowRight size={15} /></button></section>
+              <section className="card recent-capture"><h2>Recent capture</h2>{sortedCaptures[0] ? <button className="recent-capture-link" onClick={() => openLibrary(sortedCaptures[0].id)}><img src={sortedCaptures[0].imageUrl} alt="Most recent saved scope capture" /><span><strong>{captureTitle(sortedCaptures[0])}</strong><small>{sortedCaptures[0].width} × {sortedCaptures[0].height} · {sortedCaptures[0].source === 'demo' ? 'DEMO' : 'HARDWARE'}</small></span><ArrowRight size={14} /></button> : <p>Save a screen to keep a record of your work.</p>}</section>
             </aside>
-          </div>
           <section className="card activity-card"><div className="card-heading"><h2><ActivityIcon size={16} />Recent activity</h2><span className="tiny-label">{recentActivity.length ? 'LATEST FIRST' : 'SESSION LOG'}</span></div>
             {recentActivity.length ? <ul className="activity-list">{recentActivity.map((entry) => <li key={entry.id}><span className={`activity-symbol ${entry.kind}`}>{entry.kind === 'success' ? <Check size={13} /> : <Info size={13} />}</span><p>{entry.message}</p><time dateTime={entry.at}>{clockTime(entry.at)}</time></li>)}</ul> : <div className="activity-empty"><Clock3 size={17} /><p>Your connection checks and captures will appear here.</p></div>}
           </section>
+          </div>
         </>}
 
         {view === 'controls' && <ControlsView
@@ -398,7 +383,7 @@ export default function App() {
         />}
 
         {view === 'captures' && <>
-          <div className="page-heading"><div><p className="eyebrow">YOUR VISUAL NOTEBOOK</p><h1>Capture library<span className="heading-count">{state.captures.length}</span></h1><p>Saved screens, with the context that makes them useful.</p></div><button className="button secondary" disabled={!ready} onClick={() => { void withOperation('Refreshing library', () => window.scopeApp.listCaptures()); }}><RefreshCw size={15} />Refresh library</button></div>
+          <div className="page-heading"><div><h1>Capture library<span className="heading-count">{state.captures.length}</span></h1><p>Saved screens and notes from your bench.</p></div><button className="button secondary" disabled={!ready} onClick={() => { void withOperation('Refreshing library', () => window.scopeApp.listCaptures()); }}><RefreshCw size={15} />Refresh library</button></div>
           <div className="library-tools"><label className="search-box"><Search size={17} /><input aria-label="Search captures" placeholder="Search captures or notes…" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button className="icon-button" aria-label="Clear capture search" onClick={() => setSearch('')}><X size={14} /></button>}</label><div className="filter-tabs" role="group" aria-label="Filter capture source">{(['all', 'hardware', 'demo'] as const).map((source) => <button key={source} aria-pressed={sourceFilter === source} className={sourceFilter === source ? 'selected' : ''} onClick={() => setSourceFilter(source)}>{source === 'all' ? 'All captures' : source === 'demo' ? 'Demo' : 'Hardware'}</button>)}</div><span className="sort-label">Newest first<ChevronDown size={13} /></span></div>
           <div className={`library-layout ${selected ? 'with-selection' : ''}`}>
             <section className="capture-grid" aria-label="Saved captures">
@@ -409,7 +394,7 @@ export default function App() {
         </>}
 
         {view === 'settings' && <>
-          <div className="page-heading"><div><p className="eyebrow">MAKE ROOM FOR YOUR WORK</p><h1>Workspace settings</h1><p>Your instrument connection and where your captures live.</p></div></div>
+          <div className="page-heading"><div><h1>Workspace settings</h1><p>Your instrument connection and capture storage.</p></div></div>
           <div className="settings-layout"><div className="settings-sections">
             <section className="card settings-card"><div className="settings-section-heading"><span><Usb size={20} /></span><div><h2>Instrument connection</h2><p>Choose how you want to use this workspace.</p></div></div><div className="mode-options" role="group" aria-label="Instrument mode"><button className={`mode-option ${!demo ? 'selected' : ''}`} disabled={!ready} onClick={() => { if (demo) void saveSettings({ mode: 'hardware' }); }} aria-pressed={!demo}><span className="mode-option-top"><Usb size={20} /><span className="radio-indicator">{!demo && <span />}</span></span><strong>USB instrument</strong><span>Connect your Hantek DSO5102P.</span></button><button className={`mode-option ${demo ? 'selected' : ''}`} disabled={!ready} onClick={() => { if (!demo) void saveSettings({ mode: 'demo' }); }} aria-pressed={demo}><span className="mode-option-top"><Monitor size={20} /><span className="radio-indicator">{demo && <span />}</span></span><strong>Demo workspace<SourceBadge source="demo" /></strong><span>Explore with simulated screen images.</span></button></div><div className="settings-inline-note"><Info size={15} /><p>{demo ? 'Demo mode does not access a USB instrument. All generated captures are marked as demo.' : 'Use the rear USB-B connection on your powered scope. The configured WinUSB driver is used locally.'}</p></div><div className="connection-test-row"><span><span className={`status-dot ${state.connected ? 'connected' : ''}`} />{state.connected ? demo ? 'Demo connected' : 'Instrument connected' : 'Not connected'}</span><button className="button secondary" disabled={!captureReady} onClick={() => { void checkConnection(); }}><Plug size={15} />Test connection</button></div></section>
             <section className="card settings-card"><div className="settings-section-heading"><span><Folder size={20} /></span><div><h2>Capture storage</h2><p>Keep screen images and their supporting records together.</p></div></div><div className="folder-field"><FolderOpen size={19} /><p>{state.settings.storageDir || 'Storage location unavailable'}</p><button className="button secondary" disabled={!ready} onClick={() => { void chooseStorage(); }}>Choose folder</button></div><p className="field-help">New captures use this location. Export an individual PNG from the capture library when you want a copy elsewhere.</p></section>

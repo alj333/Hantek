@@ -10,7 +10,17 @@ require installing Python, Node.js or the Hantek desktop software.** A new PC
 still needs the one-time Microsoft WinUSB binding described in
 [Windows setup](SETUP_WINDOWS.md). The app does not install or change drivers.
 
-This guide describes version 0.2.0. See the [control guide](CONTROLS.md),
+This guide describes version 0.3.0. The redesign uses dark graphite surfaces,
+amber primary actions, cyan accents, thin outline icons and a bundled Inter
+variable font across Workspace, Controls, Captures and Settings. Font loading
+works offline and does not install a font into Windows. See the
+[ImageGen prompt](design/2026-09-12/prompt.md),
+[selected concept image](design/2026-09-12/workspace-concept.png) and
+[asset provenance and license](design/2026-09-12/assets.md) for the design reference.
+The concept is a mockup; actual scope pixels, capture metadata and connection
+state remain the sources for the implemented interface.
+
+See the [control guide](CONTROLS.md),
 [bench checklist](CONTROLS_CHECKLIST.md), [controls validation record](sessions/2026-09-11-controls.md)
 and original [desktop validation record](sessions/2026-09-11-desktop.md) for completed checks
 and any outstanding validation; the original CLI's live results do not by
@@ -21,7 +31,7 @@ themselves establish that the packaged desktop app has been tested on hardware.
 After a successful build, double-click:
 
 ```text
-C:\Github\Hantek\desktop\release\Hantek-Studio-0.2.0-Windows.exe
+C:\Github\Hantek\desktop\release\Hantek-Studio-0.3.0-Windows.exe
 ```
 
 This portable package runs without installing an application. The repository
@@ -32,7 +42,7 @@ also provides a launcher from PowerShell 7 x64:
 ```
 
 Add `-Demo` to that launcher to open with simulated signals selected. This saves
-Demo as the current mode; switch back in Preferences when connecting real USB.
+Demo as the current mode; switch back in Settings when connecting real USB.
 
 The alternative is `desktop/release/win-unpacked/Hantek Studio.exe`. Keep the
 **entire `win-unpacked` folder** together; its resources contain the bundled
@@ -50,7 +60,8 @@ does not need administrator rights.
 2. For USB, power the scope and connect its rear USB-B port to the configured PC
    USB port. Select Connect. The app checks the USB identity before enabling
    connected operations.
-3. Use the connection check for an echo test, then capture the screen. Inspect
+3. Use the connection check for an echo test, then **Refresh preview** in the
+   workspace toolbar to capture the screen. Inspect
    the displayed acquisition indicator and the channel, probe and timebase
    settings shown by the instrument.
 4. Save a capture when you need a lasting record. In the library, add a title
@@ -61,12 +72,37 @@ Changing the mode, interface GUID, refresh interval or storage directory ends
 the current app connection; reconnect after saving preferences. Changing the
 storage directory leaves previous captures in their original directory.
 
+## Find your way around
+
+The left navigation keeps four views available:
+
+| View | Main actions |
+| --- | --- |
+| Workspace | Connect, refresh or save the screen, request Run/Stop, inspect session details and recent activity |
+| Controls | Operate the existing named front-panel gestures alongside the scope screen |
+| Captures | Select saved images, edit titles/notes, export PNG and reveal files |
+| Settings | Choose USB or Demo, storage location, interface GUID and refresh interval |
+
+The workspace's **Open controls** button opens Controls directly. **Capture
+library** opens Captures; clicking **Recent capture** opens the actual newest
+saved capture and selects its library entry. When there are no saved captures,
+the card explains how to create one. A temporary preview is not shown as a
+saved record. Session details use the current connection and capture metadata.
+
+The captured instrument screen stays fully contained with every edge visible.
+Demo mode remains clearly labelled throughout these views.
+
 ## Screen preview and acquisition controls
 
 Live preview requests successive **screenshots**. It is not a waveform stream,
-and the refresh interval is not the scope's sampling rate. Preferences accept
+and the refresh interval is not the scope's sampling rate. Settings accepts
 intervals from 3 to 60 seconds; the default is 5 seconds. Each transfer finishes
 before another scope operation starts.
+
+Use the toolbar's **Refresh preview** icon for one deliberate screen request.
+**Auto-refresh** enables successive requests at the selected interval and starts
+off. It stops when you leave Workspace, change settings, disconnect or encounter
+an error. **Save capture** creates a new lasting library record.
 
 Preview frames are temporary. Use a saved capture for measurements or records
 you want to keep. Successful preview cleanup retains the newest three preview
@@ -106,7 +142,7 @@ use these directories:
 
 When the package is moved outside the repository, it uses the Windows user's
 application-data location for its profile and a Hantek Studio directory under
-Documents for capture storage. Preferences can select another local storage
+Documents for capture storage. Use Settings to select another local storage
 directory. The chosen directory is a **storage root**: the app adds `captures`,
 `logs`, and `demo/captures` beneath it.
 
@@ -133,7 +169,11 @@ not the scope's serial number.
 
 The existing `scripts/scope.ps1` launcher and `src/hantek_scope.py` CLI remain
 available. An agent can identify, echo, capture, list controls, save a settings
-record and request authorized acquisition or panel changes without driving the desktop interface. See the
+record and request authorized acquisition or panel changes without driving the
+desktop interface. The separate [AI setup workflow](AI_SETUP.md) reads supported
+numeric settings and applies a checked JSON target with fresh readback after
+each gesture. These named-value commands remain available through the CLI;
+the redesigned desktop controls continue to send relative panel gestures. See the
 [operating guide](OPERATIONS.md) for cross-project commands and output paths.
 
 The desktop app opens USB only for an individual operation, so the CLI can use
@@ -184,6 +224,7 @@ npm test
 npm run test:ui
 npm run test:controls
 npm run test:preview-failures
+npm run test:redesign
 npm run build
 ```
 
@@ -246,9 +287,11 @@ or broaden the desktop bridge into a raw-command or filesystem interface.
 ## Limits and troubleshooting
 
 - Voltage range, timebase and trigger adjustment are available as named panel
-  gestures. Absolute setters, calibrated settings readback, raw waveform
-  extraction and signal analysis are not implemented. The screen's RGB565 data
-  is displayed pixels, not ADC samples.
+  gestures. The desktop does not add absolute setpoint inputs or numeric setup
+  readback; use the separate [AI CLI](AI_SETUP.md) for its supported profile-checked
+  values. Calibrated measurement readback, raw waveform extraction and signal
+  analysis are not implemented. The screen's RGB565 data is displayed pixels,
+  not ADC samples.
 - Demo images never represent a measurement from the connected instrument.
 - The connection has been established for one DSO5102P; other models and
   firmware are unverified.
@@ -269,6 +312,10 @@ or broaden the desktop bridge into a raw-command or filesystem interface.
   accuracy or establish safe physical connections.
 
 ## Implementation references
+
+The 0.3 redesign passed 186 offline/demo checks. See the
+[release record](sessions/2026-09-12-ui-redesign.md) and
+[visual QA report](../design-qa.md) for results and screenshot comparisons.
 
 - [Electron security guidance](https://www.electronjs.org/docs/latest/tutorial/security)
 - [Electron process sandboxing](https://www.electronjs.org/docs/latest/tutorial/sandbox)

@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('scopeApp', {
 contextBridge.exposeInMainWorld('previewTest', {
   releaseCapture: () => { if (!captureWaiter) throw new Error('No capture pending'); const resolve = captureWaiter; captureWaiter = null; resolve(freshCapture()); },
   capturePending: () => Boolean(captureWaiter),
+  clearCatalog: () => { state.controlCatalog = []; emit(); },
 });
 `);
     const pagePromise = application.waitForEvent('window');
@@ -107,6 +108,15 @@ contextBridge.exposeInMainWorld('previewTest', {
     await page.getByRole('button', { name: 'Controls', exact: true }).click();
     await expect(page.locator('.last-control-request')).toHaveClass(/empty/);
     await expect(page.locator('.last-control-request')).not.toContainText('Measure');
+    expect(errors).toEqual([]); checks++;
+
+    // An absent catalog must never inherit a verified green/check status from
+    // the branch used when every advertised control was bench-checked.
+    await page.evaluate(() => window.previewTest.clearCatalog());
+    await expect(page.locator('[data-control-id]')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Controls unavailable', exact: true })).toBeVisible();
+    await expect(page.locator('.controls-validation-badge')).toContainText('Controls unavailable');
+    await expect(page.locator('.controls-validation-badge')).not.toHaveClass(/verified/);
     expect(errors).toEqual([]); checks++;
     const result = { status: 'passed', checks, packaged: Boolean(packaged), hardwareAccess: false, mockedInstrumentApi: true, consoleErrors: errors, folder };
     await fs.writeFile(path.join(folder, 'result.json'), JSON.stringify(result, null, 2));

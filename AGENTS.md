@@ -41,7 +41,7 @@ firmware behaves identically. Do not claim compatibility without evidence.
   first, journal before every gesture and verify fresh settings after it. Unknown
   dependencies, unexpected progress, unrelated changes or deadlines must abort.
   Never round a target silently, retry automatically, or infer that partial
-  changes were rolled back. The desktop 0.2 UI remains relative.
+  changes were rolled back. The desktop UI remains relative.
 - Preserve the numeric workflow's USB BCD `2430` restriction and exact schema
   hash check. A matching layout on another model does not validate its units or
   range tables. Include the desired trigger threshold explicitly when it must
@@ -108,6 +108,9 @@ Read `docs/DESKTOP_APP.md` before changing their integration.
   fixed subprocess arguments, request validation, size/deadline bounds and
   single-operation guard. The app has no network service or AI-provider key.
 - Demo mode must never open hardware or masquerade as a real measurement.
+- The 0.3 UI follows `docs/design/2026-09-12/workspace-concept.png`; keep actual
+  screen captures unmodified and fully contained. Preserve its bundled offline
+  font and license, source badges, keyboard focus, and minimum-window controls.
 - Automatic preview is off on startup and stops on failure/disconnection. Its
   rolling scratch files are disposable; Save capture retains permanent evidence.
   Never apply preview cleanup to saved captures or the historical archive.
@@ -117,6 +120,8 @@ Read `docs/DESKTOP_APP.md` before changing their integration.
 - For app changes run the Python suite, `npm test` and `npm run build` under
   `desktop/`, then appropriate demo UI checks (`npm run test:ui`). Packaged tests
   use `HANTEK_TEST_EXECUTABLE` to target the unpacked app executable.
+- For layout changes also run `npm run test:redesign`; compare the resulting
+  demo screenshots with the design reference and update `design-qa.md`.
 - `desktop/tests/hardware-readonly.cjs --live` is an explicit live check, excluded
   from offline builds. It reads identity and screenshots only. Never enable live
   hardware checks in ordinary tests or substitute demo results for device proof.

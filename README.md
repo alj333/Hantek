@@ -7,13 +7,21 @@ repository handles communication, screenshots and ordinary front-panel control.
 ## Desktop app
 
 **Hantek Studio** is the standalone Windows React desktop app in `desktop/`.
-Open `desktop/release/Hantek-Studio-0.2.0-Windows.exe` after building, or run
+Open `desktop/release/Hantek-Studio-0.3.0-Windows.exe` after building, or run
 `scripts/start-desktop.ps1`. Its Python runtime is included in the package.
 
 The app provides a scope screen workspace with automatic preview, explicit
 Run/Stop, 39 named front-panel controls, a saved-capture library with titles and
 notes, PNG export, connection settings and a clearly labelled demo mode. Read the
 [desktop user and build guide](docs/DESKTOP_APP.md) for details.
+
+Version 0.3.0 gives Workspace, Controls, Captures and Settings a consistent dark
+graphite interface with amber actions, cyan accents and bundled offline Inter
+typography. The workspace has a direct Refresh preview action, an Open controls
+shortcut and a recent saved capture that opens its library entry. Its visual
+reference is preserved with the [ImageGen prompt](docs/design/2026-09-12/prompt.md),
+[concept image](docs/design/2026-09-12/workspace-concept.png) and
+[asset sources and license](docs/design/2026-09-12/assets.md).
 
 The AI tools below remain available alongside the app. Pause automatic preview
 and disconnect the app before an agent takes over the USB connection.
@@ -33,8 +41,8 @@ Verified on the owner's DSO5102P with Windows 11 x64 on 11 September 2026:
 Stop and resume were verified against the displayed acquisition indicators.
 The scope was left acquiring in Auto mode after the test.
 
-Version 0.2 adds channel scale/position, timebase, trigger controls, ordinary
-menus and their soft keys. These are **relative panel gestures**, with a fresh
+Desktop controls include channel scale/position, timebase, trigger controls,
+ordinary menus and their soft keys. These are **relative panel gestures**, with a fresh
 screen after each desktop action. See the [control guide](docs/CONTROLS.md)
 and [validation checklist](docs/CONTROLS_CHECKLIST.md) for what has been checked
 and what still needs the physical bench.
@@ -43,7 +51,7 @@ The AI CLI additionally provides profile-checked numeric `settings` and
 `configure` from a JSON target file. It can select supported channel ranges,
 positions, timebase and Edge-trigger values, checking fresh instrument readback
 after each gesture. See [AI setup by named values](docs/AI_SETUP.md) for accepted
-values, prerequisites and evidence. The desktop 0.2 controls remain relative.
+values, prerequisites and evidence. The desktop 0.3 controls remain relative.
 
 Raw waveform extraction and signal analysis are not implemented. A screenshot
 contains displayed pixels, not original waveform samples. Other Hantek models

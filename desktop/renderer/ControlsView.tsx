@@ -1,9 +1,10 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Activity, Camera, Check, ChevronDown, Clock3, FileText, Info, Menu, Minus,
   MousePointer2, Play, Plus, RefreshCw, SlidersHorizontal, Square,
 } from 'lucide-react';
 import type { InstrumentControl, ScopeMode } from '../shared/contracts';
+import './controls.css';
 
 // Matches the catalog supplied by the isolated desktop backend. No keycodes or
 // default control entries live in the renderer; only advertised controls render.
@@ -53,6 +54,20 @@ export default function ControlsView({
   onAction, onRefresh, onSave, onAcquisition, onReadSettings,
 }: Props) {
   const [stepsText, setStepsText] = useState('1');
+  const deck = useRef<HTMLElement>(null);
+  const [deckHeight, setDeckHeight] = useState<number>();
+  const fitDeck = useCallback(() => {
+    const element = deck.current;
+    if (!element) return;
+    const top = element.getBoundingClientRect().top + window.scrollY;
+    const height = Math.floor(Math.max(260, window.innerHeight - top - 20));
+    setDeckHeight((previous) => previous !== undefined && Math.abs(previous - height) < 2 ? previous : height);
+  }, []);
+  useLayoutEffect(() => { fitDeck(); });
+  useEffect(() => {
+    window.addEventListener('resize', fitDeck);
+    return () => window.removeEventListener('resize', fitDeck);
+  }, [fitDeck]);
   const count = Number(stepsText);
   const validCount = stepsText.trim() !== '' && Number.isInteger(count) && count >= 1 && count <= 5;
   const enabled = connected && !busy;
@@ -89,7 +104,7 @@ export default function ControlsView({
     >
       {!softkey && <ControlIcon control={control} />}
       <span>{softkey ? /f[1-5]/i.exec(`${control.id} ${control.label}`)?.[0].toUpperCase() ?? control.label : control.label}</span>
-      {!demo && control.validation === 'bench-pending' && <span className="pending-key-dot" aria-hidden="true" />}
+      {!demo && control.validation === 'bench-pending' && <Clock3 className="pending-key-dot" size={10} aria-hidden="true" />}
     </button>
     <span className="visually-hidden" id={`control-help-${control.id}`}>
       {control.description} {demo ? 'Simulated control.' : control.validation === 'bench-pending' ? 'Bench validation pending.' : 'Previously verified on screen.'}
@@ -99,16 +114,16 @@ export default function ControlsView({
 
   return <>
     <div className="page-heading controls-heading">
-      <div><h1>Front-panel controls</h1><p>Use the instrument's menus and relative adjustments, with its screen in view.</p></div>
-      <span className={`controls-validation-badge ${demo ? 'demo' : pending ? 'pending' : 'verified'}`}>
-        {demo ? <MonitorLabel /> : pending ? <Clock3 size={13} /> : <Check size={13} />}
+      <div><h1>Front-panel controls</h1><p>Instrument menus and adjustments, with the screen in view.</p></div>
+      <span className={`controls-validation-badge ${demo ? 'demo' : !catalog.length ? 'unavailable' : pending ? 'pending' : 'verified'}`}>
+        {demo ? <MonitorLabel /> : !catalog.length ? <Info size={13} /> : pending ? <Clock3 size={13} /> : <Check size={13} />}
         {demo ? 'Simulated controls' : !catalog.length ? 'Controls unavailable' : pending ? 'Bench validation pending' : 'Screen-verified controls'}
       </span>
     </div>
 
     <div className={`controls-notice ${demo ? 'demo' : ''}`}>
       <Info size={15} />
-      <p>{demo ? 'Demo actions change a simulated instrument. They do not validate real hardware behavior.' : `${pending ? 'New front-panel controls await bench validation. ' : ''}Each click sends a request; check the resulting screen before making another adjustment.`}</p>
+      <p>{demo ? 'Demo actions are simulated. They do not validate real hardware behavior.' : `${pending ? 'Some controls await bench validation. ' : ''}Check the captured screen after each adjustment.`}</p>
     </div>
 
     <div className="controls-layout">
@@ -118,15 +133,15 @@ export default function ControlsView({
           <span className={`connection-pill ${connected ? 'connected' : ''}`}><span />{connected ? 'Connected' : 'Disconnected'}</span>
         </div>
         <div className="controls-screen-toolbar">
-          <button className="button secondary" disabled={!enabled} onClick={onRefresh}><RefreshCw size={14} />Refresh preview</button>
           <button className="button primary" disabled={!enabled} onClick={onSave}><Camera size={14} />Save capture</button>
-          <div className="controls-acquisition"><button className="button quiet" disabled={!enabled} onClick={() => onAcquisition('start')}><Play size={13} />Run</button><button className="button quiet" disabled={!enabled} onClick={() => onAcquisition('stop')}><Square size={12} />Stop</button></div>
+          <div className="controls-acquisition"><button className="button secondary" disabled={!enabled} onClick={() => onAcquisition('start')}><Play size={13} />Run</button><button className="button secondary" disabled={!enabled} onClick={() => onAcquisition('stop')}><Square size={12} />Stop</button></div>
+          <button className="button quiet controls-refresh" aria-label="Refresh preview" title="Refresh preview" disabled={!enabled} onClick={onRefresh}><RefreshCw size={14} /><span>Refresh preview</span></button>
         </div>
         <div className={`control-screen-row ${softkeys.length ? 'with-softkeys' : ''}`}>
           {screen}
-          {softkeys.length > 0 && <div className="softkey-rail" role="group" aria-label="Right-screen softkeys"><span>SCREEN<br />KEYS</span>{softkeys.map((control) => renderControl(control, true))}<small>Labels on<br />the screen</small></div>}
+          {softkeys.length > 0 && <div className="softkey-rail" role="group" aria-label="Right-screen softkeys"><span>SOFT<br />KEYS</span>{softkeys.map((control) => renderControl(control, true))}<small>Follow the<br />screen</small></div>}
         </div>
-        <div className="controls-screen-caption"><MousePointer2 size={13} /><p>One gesture, one request. Menu keys follow the context shown on the scope. Automatic refresh pauses before every control action.</p></div>
+        <div className="controls-screen-caption"><MousePointer2 size={13} /><p>One gesture per request. Soft keys follow the displayed menu. Auto-refresh pauses before a control action.</p></div>
         <details className="panel-menu-help"><summary>Coupling, probes and trigger options<ChevronDown size={13} /></summary><ul>
           <li>Open <strong>CH1 menu</strong> or <strong>CH2 menu</strong> for channel coupling, probe factor and other channel options.</li>
           <li>Open <strong>Trigger menu</strong> for source, edge and other trigger options.</li>
@@ -135,19 +150,19 @@ export default function ControlsView({
         </ul></details>
         <section className={`last-control-request ${lastRequest?.status ?? 'empty'}`} aria-label="Last control request" aria-live="polite">
           <div className="last-control-title"><span>{lastRequest?.status === 'sending' ? 'REQUESTING' : 'LAST PANEL REQUEST'}</span>{lastRequest && <time dateTime={lastRequest.at}>{new Date(lastRequest.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>}</div>
-          {lastRequest ? <><strong>{lastRequest.label}{lastRequest.rotary ? ` · ${lastRequest.count} ${lastRequest.count === 1 ? 'step' : 'steps'}` : ''}<span>{lastRequest.source === 'demo' ? 'DEMO' : 'HARDWARE'}</span></strong><p>{lastRequest.message}</p>{lastRequest.status === 'replied' && <small>Reply received · requested state is not independently verified.</small>}</> : <p>Your next request and its response will appear here. No state is inferred from button presses.</p>}
+          {lastRequest ? <><strong>{lastRequest.label}{lastRequest.rotary ? ` · ${lastRequest.count} ${lastRequest.count === 1 ? 'step' : 'steps'}` : ''}<span>{lastRequest.source === 'demo' ? 'DEMO' : 'HARDWARE'}</span></strong><p>{lastRequest.message}</p>{lastRequest.status === 'replied' && <small>Reply received · requested state is not independently verified.</small>}</> : <p>No panel request in this session. Verify settings on the captured instrument screen.</p>}
         </section>
         <div className="settings-record-action"><button className="button quiet" disabled={!enabled} onClick={onReadSettings}><FileText size={14} />Save settings record</button><span>Preserve a read-only diagnostic record.</span></div>
       </section>
 
-      <aside className="control-deck" aria-label="Instrument front panel">
+      <aside className="control-deck" aria-label="Instrument front panel" ref={deck} style={deckHeight === undefined ? undefined : { height: deckHeight }}>
         <div className="control-deck-settings"><div><strong>Instrument controls</strong><span>{catalog.length ? `${catalog.length} controls` : 'Waiting for supported controls'}</span></div>
           <label>Steps per click<input aria-label="Rotary steps per click" type="number" min={1} max={5} step={1} inputMode="numeric" value={stepsText} disabled={busy} onChange={(event) => setStepsText(event.target.value)} aria-invalid={!validCount} aria-describedby={!validCount ? 'rotary-count-error' : 'rotary-count-help'} /></label>
         </div>
         <p className={`rotary-count-help ${!validCount ? 'invalid' : ''}`} id={!validCount ? 'rotary-count-error' : 'rotary-count-help'}>{validCount ? 'Rotary adjustments: 1–5 steps. Menu buttons: one press.' : 'Use 1–5 whole steps.'}</p>
         <div className="control-groups">
           {groups.length ? groups.map(([group, controls]) => <section className={`control-group ${/ch(?:annel)?\s*1/i.test(group) ? 'channel-one' : /ch(?:annel)?\s*2/i.test(group) ? 'channel-two' : ''}`} key={group} aria-label={`${group} controls`}>
-            <div className="control-group-heading"><h2>{group}</h2>{!demo && controls.some((control) => control.validation === 'bench-pending') && <span><span />Bench pending</span>}</div>
+            <div className="control-group-heading"><h2>{group}</h2>{!demo && controls.some((control) => control.validation === 'bench-pending') && <span><Clock3 size={10} />Bench pending</span>}</div>
             <div className="panel-key-grid">{controls.map((control) => renderControl(control))}</div>
           </section>) : <div className="controls-empty"><SlidersHorizontal size={25} /><h2>Controls unavailable</h2><p>The desktop app has not supplied its supported instrument controls.</p></div>}
           {groups.length > 0 && <div className="control-deck-end"><ChevronDown size={13} />Supported instrument controls</div>}

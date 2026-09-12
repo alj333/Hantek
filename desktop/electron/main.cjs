@@ -51,7 +51,7 @@ async function start() {
   service = new StudioService({ storageDir, settingsPath: path.join(app.getPath('userData'), 'settings.json'), previewDir: path.join(app.getPath('userData'), 'previews'), version: app.getVersion(), bridge: request => runBridge(runtimeCommand({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, repoRoot }), request) });
   await service.initialize();
   if (process.argv.includes('--demo')) await service.updateSettings({ mode: 'demo' });
-  mainWindow = new BrowserWindow({ width: 1440, height: 960, minWidth: 980, minHeight: 680, show: false, backgroundColor: '#f4f5f2', title: 'Hantek Studio', icon: path.join(__dirname, '..', 'assets', 'icon.png'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false, devTools: !app.isPackaged } });
+  mainWindow = new BrowserWindow({ width: 1440, height: 960, minWidth: 980, minHeight: 680, show: false, backgroundColor: '#11171d', title: 'Hantek Studio', icon: path.join(__dirname, '..', 'assets', 'icon.png'), autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, spellcheck: false, devTools: !app.isPackaged } });
   mainWindow.setMenu(null);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', event => event.preventDefault());
