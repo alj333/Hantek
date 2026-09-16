@@ -26,6 +26,30 @@ reference is preserved with the [ImageGen prompt](docs/design/2026-09-12/prompt.
 The AI tools below remain available alongside the app. Pause automatic preview
 and disconnect the app before an agent takes over the USB connection.
 
+## Screenshots
+
+Actual screenshots of **Hantek Studio 0.3.0** running in **Demo mode**. The signals
+and saved capture below are simulated; no USB instrument is accessed.
+
+### Scope workspace
+
+View the scope screen, refresh the preview, save captures and open the controls.
+
+![Hantek Studio workspace showing two simulated traces, preview actions and session details](docs/screenshots/workspace.png)
+
+### Front-panel controls
+
+Adjust channels, timebase and trigger through named front-panel gestures, with
+the scope screen alongside the controls. Desktop adjustments are relative.
+
+![Hantek Studio front-panel view with simulated screen, channel and timebase controls, trigger controls and soft keys](docs/screenshots/controls.png)
+
+### Capture library
+
+Browse saved screens, add names and notes, and export PNG images.
+
+![Hantek Studio capture library with a selected demo capture, editable name and notes, and PNG export](docs/screenshots/capture-library.png)
+
 ## What works
 
 Verified on the owner's DSO5102P with Windows 11 x64 on 11 September 2026:
